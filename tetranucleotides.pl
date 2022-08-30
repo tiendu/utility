@@ -2,14 +2,13 @@ use strict;
 use Data::Dumper;
 
 my $file_path = shift @ARGV;
+my $threshold = shift @ARGV;
 my $file_path_cp = $file_path;
 $file_path_cp =~ s/.*\///;
 my ($file_name, $file_extension) = $file_path_cp =~ /^(.+)\.([^.]+)$/;
 
 open my $input, "<:utf8", $file_path or die;
-my %id_sequence_hash;
-my $stored_id;
-my $flag;
+my (%id_sequence_hash, $stored_id, $flag);
 while (<$input>) {
     chomp;
     if ($_ =~ m/\A>(.+)/) {
@@ -26,17 +25,10 @@ while (<$input>) {
 };
 close $input;
 
-my @palindromic_tetranucleotides;
+our @tetranucleotides;
 foreach (kmer_generator(4)) {
-    if (palindrome(\$_)) {
-        push @palindromic_tetranucleotides, $_;
-    };
+    push @palindromic_tetranucleotides, $_ if palindrome(\$_);
 };
-
-# my @all_tetranucleotides;
-# foreach (kmer_generator(4)) {
-#     push @all_tetranucleotides, $_;
-# };
 
 my %id_kmer_normusage;
 for my $id (sort keys %id_sequence_hash) {
@@ -55,7 +47,7 @@ for my $id (sort keys %id_sequence_hash) {
     };
 };
 
-my %result = agglomerative_clustering(\%id_kmer_normusage, \@palindromic_tetranucleotides, 50);
+my %result = agglomerative_clustering(\%id_kmer_normusage, $threshold);
 
 my $i = 1;
 foreach (sort keys %result) {
@@ -70,8 +62,7 @@ foreach (sort keys %result) {
 
 sub agglomerative_clustering {
     my %data = %{$_[0]};
-    my @array = @{$_[1]};
-    my $threshold = $_[2];
+    my $threshold = $_[1];
     my $size = keys %data;
     my %clusters;
     for (my $i = 1; $i < $size; $i++) {
@@ -80,7 +71,7 @@ sub agglomerative_clustering {
         for my $index_1 (0 .. $#keys) {
             for my $index_2 (1 + $index_1 .. $#keys) {
                 my ($distance, $key_1, $key_2) = (0, $keys[$index_1], $keys[$index_2]);
-                $distance += ($data{$key_1}{$_} - $data{$key_2}{$_}) ** 2 foreach @array;
+                $distance += ($data{$key_1}{$_} - $data{$key_2}{$_}) ** 2 foreach @::tetranucleotides;
                 $distance = sqrt($distance);
                 $distances{$key_1}{$key_2} = $distance;
                 $find->{min} = $distance unless $find->{min};
@@ -92,7 +83,7 @@ sub agglomerative_clustering {
             };
         };
         my ($key_1, $key_2) = $find->{key}->@*;
-        $data{"$key_1,$key_2"}{$_} = mean($data{$key_1}{$_}, $data{$key_2}{$_}) foreach @array;
+        $data{"$key_1,$key_2"}{$_} = mean($data{$key_1}{$_}, $data{$key_2}{$_}) foreach @::tetranucleotides;
         delete @data{($key_1, $key_2)};
         last if $find->{min} >= $threshold;
         %clusters = %data;
