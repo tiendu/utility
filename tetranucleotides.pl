@@ -31,8 +31,9 @@ foreach (kmer_generator(4)) {
 
 my %id_kmer_normusage;
 for my $id (sort keys %id_sequence_hash) {
-    my $kmer_counts = kmer_count_generator($id_sequence_hash{$id}, 4);
-    my $base_frequencies = base_frequency_generator($id_sequence_hash{$id});
+    my $no_repeat_sequence = repeat_modifier($id_sequence_hash{$id}, 4, 0);
+    my $kmer_counts = kmer_count_generator($no_repeat_sequence, 4);
+    my $base_frequencies = base_frequency_generator($no_repeat_sequence);
     foreach (@tetranucleotides) {
         my $expected_count = 1;
         my $normalised_usage;
@@ -40,7 +41,7 @@ for my $id (sort keys %id_sequence_hash) {
         for my $base ("A", "T", "G", "C") {
             $expected_count *= ($base_frequencies->{$base} ** $kmer_base_counts->{$base});
         };
-        $expected_count *= (length($id_sequence_hash{$id}) - 4 + 1);
+        $expected_count *= (length($no_repeat_sequence) - 4 + 1);
         $normalised_usage = $kmer_counts->{$_} / $expected_count;
         $id_kmer_normusage{$id}{$_} = $normalised_usage;
     };
@@ -105,6 +106,12 @@ sub palindrome {
     } else {
         return 0;
     };
+};
+
+sub repeat_modifier {
+    my ($string, $threshold, $change) = @_;
+    $string =~ s/(.)\1{$threshold,}/$1 x $change/ge;
+    return $string;
 };
 
 sub kmer_generator {
