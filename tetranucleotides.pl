@@ -1,5 +1,4 @@
 use strict;
-use Data::Dumper;
 
 my $file_path = shift @ARGV;
 my $threshold = shift @ARGV;
@@ -27,17 +26,17 @@ close $input;
 
 our @tetranucleotides;
 foreach (kmer_generator(4)) {
-    push @palindromic_tetranucleotides, $_ if palindrome(\$_);
+    push @tetranucleotides, $_ if palindrome(\$_);
 };
 
 my %id_kmer_normusage;
 for my $id (sort keys %id_sequence_hash) {
-    my $kmer_counts = kmer_count_generator(\$id_sequence_hash{$id}, 4);
-    my $base_frequencies = base_frequency_generator(\$id_sequence_hash{$id});
-    foreach (@palindromic_tetranucleotides) {
+    my $kmer_counts = kmer_count_generator($id_sequence_hash{$id}, 4);
+    my $base_frequencies = base_frequency_generator($id_sequence_hash{$id});
+    foreach (@tetranucleotides) {
         my $expected_count = 1;
         my $normalised_usage;
-        my $kmer_base_counts = base_count_generator(\$_);
+        my $kmer_base_counts = base_count_generator($_);
         for my $base ("A", "T", "G", "C") {
             $expected_count *= ($base_frequencies->{$base} ** $kmer_base_counts->{$base});
         };
@@ -130,8 +129,8 @@ sub base_count_generator {
     my @base_list = ("A", "T", "G", "C");
     my $base;
     map {$base->{$_} = 0} @base_list;
-    for (my $i = 0; $i <= length(${$sequence}); $i++) {
-        $base->{substr(${$sequence}, $i, 1)}++ if exists $base->{substr(${$sequence}, $i, 1)};
+    for (my $i = 0; $i <= length($sequence); $i++) {
+        $base->{substr($sequence, $i, 1)}++ if exists $base->{substr($sequence, $i, 1)};
     };
     return $base;
 };
@@ -141,8 +140,8 @@ sub base_frequency_generator {
     my @base_list = ("A", "T", "G", "C");
     my $base;
     map {$base->{$_} = 0} @base_list;
-    for (my $i = 0; $i <= length(${$sequence}); $i++) {
-        $base->{substr(${$sequence}, $i, 1)}++ if exists $base->{substr(${$sequence}, $i, 1)};
+    for (my $i = 0; $i <= length($sequence); $i++) {
+        $base->{substr($sequence, $i, 1)}++ if exists $base->{substr($sequence, $i, 1)};
     };
     my $total = 0;
     $total += $base->{$_} for keys %{$base};
@@ -156,8 +155,8 @@ sub kmer_count_generator {
     my @kmers_list = kmer_generator($k);
     my $kmers;
     map {$kmers->{$_} = 0} @kmers_list;
-    for (my $i = 0; $i <= length(${$sequence}) - $k; $i++) {
-        $kmers->{substr(${$sequence}, $i, $k)}++ if exists $kmers->{substr(${$sequence}, $i, $k)};
+    for (my $i = 0; $i <= length($sequence) - $k; $i++) {
+        $kmers->{substr($sequence, $i, $k)}++ if exists $kmers->{substr($sequence, $i, $k)};
     };
     return $kmers;
 };
@@ -168,8 +167,8 @@ sub kmer_frequency_generator {
     my @kmers_list = kmer_generator($k);
     my $kmers;
     map {$kmers->{$_} = 0} @kmers_list;
-    for (my $i = 0; $i <= length(${$sequence}) - $k; $i++) {
-        $kmers->{substr(${$sequence}, $i, $k)}++ if exists $kmers->{substr(${$sequence}, $i, $k)};
+    for (my $i = 0; $i <= length($sequence) - $k; $i++) {
+        $kmers->{substr($sequence, $i, $k)}++ if exists $kmers->{substr($sequence, $i, $k)};
     };
     my $total = 0;
     $total += $kmers->{$_} for keys %{$kmers};
