@@ -4,34 +4,36 @@ my @files = @ARGV;
 my %records;
 
 for my $file (@files) {
-    my @lengths;
-    my $file_name = $1 if $file =~ /^(.+)\.([^.]+)$/;
-    open my $file, "<:utf8", $file or die;
-    while (<$file>) {
+    $records{$file} = [];
+    open my $input, "<:utf8", $file or die;
+    print "Processing $file\n";
+    while (<$input>) {
         chomp;
         if ($_ =~ m/\A>(.+)/) {
             next;
         } else {
-            push @lengths, length($_);
+            push $records{$file}->@*, length($_);
         };
-        $records{$file_name} = [@lengths];
         last if eof;
     };
-    close $file;
+    close $input;
 };
-
-print "File\tNo of seqs\tTotal bp\tMin\tMax\tauN\tN50\tN90\n";
+print "Calculating. Please wait...\n";
 for my $record (sort keys %records) {
+    my $size = format_number(scalar $records{$record}->@*);
+    my @sorted = sort {$a <=> $b} $records{$record}->@*;
+    my ($min_length, $max_length) = @sorted[0, -1];
     my ($sum_length, $sum_squared_length) = (0, 0);
-    $sum_length += $_ foreach $records{$record}->@*;
-    my $length = scalar $records{$record}->@* + 1;
-    my $max_length = max($records{$record}->@*);
-    my $min_length = min($records{$record}->@*);
-    $sum_squared_length += ($_ ** 2) foreach $records{$record}->@*;
-    my $auN = sprintf("%.3f", $sum_squared_length / $sum_length);
-    my $n50 = Nx(\$records{$record}->@*, 50);
-    my $n90 = Nx(\$records{$record}->@*, 90);
-    print join("\t", $record, $length, $sum_length, $min_length, $max_length, $auN, $n50, $n90, "\n");
+    $sum_length += $_ foreach @sorted;
+    $sum_squared_length += ($_ ** 2) foreach @sorted;
+    my $auN = format_number(sprintf("%.3f", $sum_squared_length / $sum_length));
+    $min_length = format_number($min_length);
+    $max_length = format_number($max_length);
+    $sum_length = format_number(sprintf("%.3f", $sum_length / 1_000_000));
+    my $n50 = format_number(Nx(\@sorted, 50));
+    my $n90 = format_number(Nx(\@sorted, 90));
+    print "=" x 50 . "\n";
+    print join(" | ", $record, "Seqs: ${size}", "Total (Mb): ${sum_length}", "Minlen: ${min_length}", "Maxlen: ${max_length}", "auN: ${auN}", "N50: ${n50}", "N90: ${n90}", "\n");
 };
 
 # for my $record (sort keys %records) {
@@ -42,23 +44,6 @@ for my $record (sort keys %records) {
 #     close $result;
 # };
 
-
-sub max {
-    my $max = shift;
-    foreach (@_) {
-        $max = $_ if $_ > $max;
-    };
-    return $max;
-}
-
-sub min {
-    my $min = shift;
-    foreach (@_) {
-        $min = $_ if $_ < $min;
-    };
-    return $min;
-};
-
 sub Nx {
     my @lengths = @{$_[0]};
     my $x = $_[1];
@@ -67,12 +52,18 @@ sub Nx {
     for my $len (@lengths) {
         $total_sum += $len;
     };
-    for my $len (sort {$b <=> $a} @lengths) { 
+    for my $len (sort {$a <=> $b} @lengths) { 
         $cumulative_sum += $len;
-        if ($cumulative_sum >= $total_sum * $x / 100) {
+        if ($cumulative_sum >= $total_sum * (100 - $x) / 100) {
             return $len;
         };
     };
+};
+
+sub format_number {
+    my $num = $_[0];
+    while ($num =~ s/^(-?\d+)(\d{3}(?:,\d{3})*(?:\.\d+)*)$/$1,$2/) {};
+    return $num;
 };
 
 # sub table {
