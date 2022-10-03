@@ -1,4 +1,12 @@
 use strict;
+use warnings;
+use Getopt::Long;
+
+GetOptions(
+    "input|i=s" => \my $file_path,
+    "size|s=i" => \my $size,
+    "count|c=i" => \my $count,
+);
 
 # Example:
 # 	S1	S2	S3
@@ -12,13 +20,14 @@ use strict;
 # B4	0	0	2	
 # B5	0	0	9	
 
-my $file_path = shift @ARGV;
-my $size = shift @ARGV;
-my $count = shift @ARGV;
-
 my $file_path_cp = $file_path;
 $file_path_cp =~ s/.*\///;
 my ($file_name, $file_extension) = $file_path_cp =~ /^(.+)\.([^.]+)$/;
+
+print "Input: ${file_path}\n";
+print "Parameters:\n\t- Number of subsamples: ${size}\n\t- Total count: ${count}\n";
+print "=" x 30 . "\n";
+print "Running now! Please wait...\n";
 
 open my $file, "<", $file_path or die;
 my @headers;
@@ -36,7 +45,7 @@ close $file;
 
 for my $key1 (keys %records) {
     for my $key2 (keys %{$records{$key1}}) {
-        open my $tmp, ">>", "$key1.tmp";
+        open my $tmp, ">>", "${key1}_${file_name}.tmp";
         my $count = $records{$key1}{$key2};
         while ($count > 0) {
             print $tmp "$key2\n";
@@ -47,8 +56,8 @@ for my $key1 (keys %records) {
 my $iter = 0;
 while ($iter < $size) {
     for my $header (@headers[1 .. $#headers]) {
-        open my $input, "<", "$header.tmp";
-        open my $output, ">", "separated_${header}${iter}.tmp";
+        open my $input, "<", "${header}_${file_name}.tmp";
+        open my $output, ">", "separated_${header}${iter}_${file_name}.tmp";
         my @records;
         while (<$input>) {
             chomp;
@@ -63,7 +72,7 @@ while ($iter < $size) {
     $iter++;
 };
     
-for my $file (glob("separated_*.tmp")) {
+for my $file (glob("separated_*_${file_name}.tmp")) {
     my %counter;
     open my $input, "<", $file;
     my $header;
@@ -81,7 +90,7 @@ for my $file (glob("separated_*.tmp")) {
     };
 };
 
-my @count_files = glob("count_*.tmp");
+my @count_files = glob("count_*_${file_name}.tmp");
 my %records;
 my $tally = 0;
 for my $file (@count_files) {
@@ -101,6 +110,9 @@ for my $key (sort keys %records) {
     print $merged join("\t", $key, map { $_ // 0 } @values[0 .. $tally - 1], "\n");
 };
 close $merged;
+
+print "=" x 30 . "\n";
+print "Output: subsampled_${file_name}_${size}_${count}.tsv\n";
 
 foreach (glob("*.tmp")) {
     unlink "$_";
