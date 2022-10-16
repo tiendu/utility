@@ -1,23 +1,6 @@
 use strict;
 use warnings;
 
-# A.................Adenine
-# C.................Cytosine
-# G.................Guanine
-# T (or U)..........Thymine (or Uracil)
-# R.................A or G
-# Y.................C or T
-# S.................G or C
-# W.................A or T
-# K.................G or T
-# M.................A or C
-# B.................C or G or T
-# D.................A or G or T
-# H.................A or C or T
-# V.................A or C or G
-# N.................any base
-# . or -............gap
-
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 package IdSequence;
 
@@ -58,6 +41,7 @@ sub delineate {
         "C" => ["C"],
         "G" => ["G"],
         "T" => ["T"],
+        "U" => ["U"],
         "R" => ["A","G"],
         "Y" => ["C","T"],
         "S" => ["G","C"],
@@ -69,14 +53,33 @@ sub delineate {
         "H" => ["A","C","T"],
         "V" => ["A","C","G"],
         "N" => ["A","T","G","C"],
+        "." => [""],
+        "-" => [""],
     );
     
+# A.................Adenine
+# C.................Cytosine
+# G.................Guanine
+# T (or U)..........Thymine (or Uracil)
+# R.................A or G
+# Y.................C or T
+# S.................G or C
+# W.................A or T
+# K.................G or T
+# M.................A or C
+# B.................C or G or T
+# D.................A or G or T
+# H.................A or C or T
+# V.................A or C or G
+# N.................any base
+# . or -............gap
+    
     my $solutions = 1;
-    $solutions *= $_ for my @entries = map { 0 + @{$hash{$_}} } my @keys = sort keys %hash;
+    $solutions *= $_ for my @entries = map { 0 + @{$hash{$_}} } my @keys = sort keys %hash; # put reverse before sort to have the keys alphabetically
     
     my @pairs = map {
         my $i = $_;
-        [ map {
+        [ map { # put reverse before map to produce list alphabetically
             [$keys[$_], $hash{$keys[$_]}[$i % $entries[$_]]],
             ($i = int($i / $entries[$_])) x 0
         } 0 .. $#entries];
@@ -87,6 +90,9 @@ sub delineate {
     for my $pair (@pairs) {
         my $temporary = $sequence;
         for my $replacement (@{$pair}) {
+            if (@{$replacement}[0] eq "." || @{$replacement}[0] eq "-") {
+                @{$replacement}[0] = "\\" . @{$replacement}[0];
+            };
             $temporary =~ s/@{$replacement}[0]/@{$replacement}[1]/g;
         };
         push @results, $temporary;
@@ -108,4 +114,4 @@ sub uniq {
     grep !$seen{$_}++, @_;
 #     grep !$seen{$_->[0]}{$_->[1]}++, @_;
 #     grep !$seen{"$_->[0],$_->[1]"}++, @_;
-}
+};
