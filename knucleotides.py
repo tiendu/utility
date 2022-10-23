@@ -115,7 +115,8 @@ sorted_filtered = sorted(filtered, key = lambda x: x[2], reverse = True)
 for i in sorted_filtered:
     if G.degree(i[0]) > 1 and G.degree(i[1]) > 1:
         G.remove_edge(i[0], i[1])
-    
+
+# credit to https://github.com/53RT/Highly-Connected-Subgraphs-Clustering-HCS for making this possible
 def highly_connected(G, E):
     """
     Checks if the graph G is highly connected
