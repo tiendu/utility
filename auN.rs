@@ -63,34 +63,33 @@ fn main() -> io::Result<()> {
     let mut gc_content: f64 = 0.0;
     for i in &storage {
         sequences.push(i.sequence.clone());
-        gc_content += (i.base_frequency()[2] + i.base_frequency()[3]);
+        gc_content += i.base_frequency()[2] + i.base_frequency()[3];
     }
     gc_content = gc_content * 100.0 / (sequences.len() as f64);
-    let mut sequences: Vec<&str> = sequences.iter().map(|s| &**s).collect();
     let n50 = Nx(sequences.clone(), 50);
     let n90 = Nx(sequences.clone(), 90);
     let totsum: usize = sequences
         .clone()
         .iter()
-        .map(|&x| x.len())
+        .map(|x| x.len())
         .sum();
     let sqsum: usize = sequences
         .clone()
         .iter()
-        .map(|&x| x.len().pow(2))
+        .map(|x| x.len().pow(2))
         .sum();
     let auN: f64 = (sqsum as f64) / (totsum as f64);
     println!("{}\tN50: {}\tN90: {}\tauN: {:.3}\tGC: {:.3}", input, n50, n90, auN, gc_content);
     Ok(())
 }
 
-fn Nx(mut seqs: Vec<&str>, x: usize) -> usize {
+fn Nx(mut seqs: Vec<String>, x: usize) -> usize {
     seqs.sort_by(|a, b| a.len().cmp(&b.len()));
     seqs.reverse();
     let mut cumsum: usize = 0;
     let totsum: usize = seqs
         .iter()
-        .map(|&x| x.len())
+        .map(|x| x.len())
         .sum();
     for i in 0 .. seqs.len() {
         cumsum += seqs[i].len();
