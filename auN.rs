@@ -85,7 +85,6 @@ fn main() -> io::Result<()> {
 
 fn Nx(mut seqs: Vec<String>, x: usize) -> usize {
     seqs.sort_by(|a, b| a.len().cmp(&b.len()));
-    seqs.reverse();
     let mut cumsum: usize = 0;
     let totsum: usize = seqs
         .iter()
