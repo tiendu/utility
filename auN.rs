@@ -21,8 +21,8 @@ impl IdSequence {
             base_freq.push((self.sequence
                 .matches(&i)
                 .count() as f64) / (self.sequence
-                .chars()
-                .count()) as f64);
+                    .chars()
+                    .count()) as f64);
         }
         return base_freq;
     }
