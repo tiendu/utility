@@ -7,7 +7,7 @@ my %records;
 for my $file (@files) {
     $records{$file} = [];
     open my $input, "<:utf8", $file or die;
-    print "Processing $file\n";
+    print "Reading $file\n";
     while (<$input>) {
         chomp;
         if ($_ =~ m/\A>(.+)/) {
@@ -33,8 +33,9 @@ for my $record (sort keys %records) {
     $sum_length = format_number(sprintf("%.3f", $sum_length / 1_000_000));
     my $n50 = format_number(Nx(\@sorted, 50));
     my $n90 = format_number(Nx(\@sorted, 90));
-    print "=" x 50 . "\n";
-    print join(" | ", $record, "Seqs: ${size}", "Total (Mb): ${sum_length}", "Minlen: ${min_length}", "Maxlen: ${max_length}", "auN: ${auN}", "N50: ${n50}", "N90: ${n90}", "\n");
+    print "=" x 36 . "\n";
+    my $filename = $record =~ s/\A(.+)\///r;
+    print join(" | ", $filename, "Seqs: ${size}", "Total (Mb): ${sum_length}", "Minlen: ${min_length}", "Maxlen: ${max_length}", "auN: ${auN}", "N50: ${n50}", "N90: ${n90}", "\n");
 };
 
 # for my $record (sort keys %records) {
