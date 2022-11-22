@@ -16,9 +16,8 @@ sub new {
 package main;
 my $file_path = shift @ARGV;
 
-my $file_path_cp = $file_path;
-$file_path_cp =~ s/.*\///;
-my ($file_name, $file_extension) = $file_path_cp =~ /^(.+)\.([^.]+)$/;
+my $file = $file_path =~ s/.*\///r;
+my ($file_name, $file_extension) = $file =~ /^(.+)\.([^.]+)$/;
 
 open my $input, "<:utf8", $file_path or die;
 my (@IdSequence_array, $id);
