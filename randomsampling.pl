@@ -20,9 +20,8 @@ GetOptions(
 # B4	0	0	2	
 # B5	0	0	9	
 
-my $file_path_cp = $file_path;
-$file_path_cp =~ s/.*\///;
-my ($file_name, $file_extension) = $file_path_cp =~ /^(.+)\.([^.]+)$/;
+my $file = $file_path =~ s/.*\///r;
+my ($file_name, $file_extension) = $file =~ /^(.+)\.([^.]+)$/;
 
 print "Input: ${file_path}\n";
 print "Parameters:\n\t- Number of subsamples: ${size}\n\t- Total count: ${count}\n";
