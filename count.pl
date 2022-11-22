@@ -1,7 +1,7 @@
 use strict;
 
 my $file_path = shift @ARGV;
-my $file = $file_path =~ s/.*\///;
+my $file = $file_path =~ s/.*\///r;
 my ($file_name, $file_extension) = $file =~ /^(.+)\.([^.]+)$/;
 
 open my $file, "<:utf8", $file_path or die;
