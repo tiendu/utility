@@ -35,7 +35,7 @@ for my $record (sort keys %records) {
     my $n90 = format_number(Nx(\@sorted, 90));
     print "=" x 36 . "\n";
     my $filename = $record =~ s/\A(.+)\///r;
-    print join(" | ", $filename, "Seqs: ${size}", "Total (Mb): ${sum_length}", "Minlen: ${min_length}", "Maxlen: ${max_length}", "auN: ${auN}", "N50: ${n50}", "N90: ${n90}", "\n");
+    print join(" | ", $filename, "Seqs: ${size}", "Total (Mb): ${sum_length}", "Minlen (bp): ${min_length}", "Maxlen (bp): ${max_length}", "auN: ${auN}", "N50: ${n50}", "N90: ${n90}", "\n");
 };
 
 # for my $record (sort keys %records) {
