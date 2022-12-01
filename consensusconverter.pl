@@ -14,12 +14,13 @@ sub new {
 };
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 package main;
-my $file_path = shift @ARGV;
+my $path = shift @ARGV;
+my $opt = shift @ARGV;
 
-my $file = $file_path =~ s/.*\///r;
+my $file = $path =~ s/.*\///r;
 my ($file_name, $file_extension) = $file =~ /^(.+)\.([^.]+)$/;
 
-open my $input, "<:utf8", $file_path or die;
+open my $input, "<:utf8", $path or die;
 my (@IdSequence_array, $id);
 while (<$input>) {
     chomp;
@@ -33,14 +34,13 @@ while (<$input>) {
 };
 close $input;
 
-sub delineate {
-    my $sequence = $_[0];
+sub na_delineate {
+    my $seq = $_[0];
     my %hash = (
         "A" => ["A"],
         "C" => ["C"],
         "G" => ["G"],
         "T" => ["T"],
-        "U" => ["U"],
         "R" => ["A","G"],
         "Y" => ["C","T"],
         "S" => ["G","C"],
@@ -52,59 +52,78 @@ sub delineate {
         "H" => ["A","C","T"],
         "V" => ["A","C","G"],
         "N" => ["A","T","G","C"],
-        "." => [""],
-        "-" => [""],
     );
     
-# A.................Adenine
-# C.................Cytosine
-# G.................Guanine
-# T (or U)..........Thymine (or Uracil)
-# R.................A or G
-# Y.................C or T
-# S.................G or C
-# W.................A or T
-# K.................G or T
-# M.................A or C
-# B.................C or G or T
-# D.................A or G or T
-# H.................A or C or T
-# V.................A or C or G
-# N.................any base
-# . or -............gap
-    
-    my $solutions = 1;
-    $solutions *= $_ for my @entries = map { 0 + @{$hash{$_}} } my @keys = sort keys %hash; # put reverse before sort to have the keys alphabetically
+    my $sols = 1;
+    $sols *= $_ for my @entrs = map { 0 + @{$hash{$_}} } my @keys = sort keys %hash;
     
     my @pairs = map {
         my $i = $_;
-        [ map { # put reverse before map to produce list alphabetically
-            [$keys[$_], $hash{$keys[$_]}[$i % $entries[$_]]],
-            ($i = int($i / $entries[$_])) x 0
-        } 0 .. $#entries];
-    } 0 .. $solutions - 1;
+        [ map {
+            [$keys[$_], $hash{$keys[$_]}[$i % $entrs[$_]]],
+            ($i = int($i / $entrs[$_])) x 0
+        } 0 .. $#entrs];
+    } 0 .. $sols - 1;
     
-    my @results;
+    my @res;
     my $i = 0;
     for my $pair (@pairs) {
-        my $temporary = $sequence;
-        for my $replacement (@{$pair}) {
-            if (@{$replacement}[0] eq "." || @{$replacement}[0] eq "-") {
-                @{$replacement}[0] = "\\" . @{$replacement}[0];
-            };
-            $temporary =~ s/@{$replacement}[0]/@{$replacement}[1]/g;
+        my $temp = $seq;
+        for my $repl (@{$pair}) {
+            $temp =~ s/@{$repl}[0]/@{$repl}[1]/g;
         };
-        push @results, $temporary;
+        push @res, $temp;
     };
-    return uniq(@results);
+    return uniq(@res);
+};
+
+sub aa_delineate {
+    my $seq = $_[0];
+#     my @subs = $seq =~ /(?<=\[)\b\w+\b(?=[\]])/g; # match content inside the square brackets
+#     my @not_subs = $seq =~ /(?<!\[)\b\w+\b(?![\]])/g; # match content outside the square brackets
+    my @subs = $seq =~ /\[[^]]*\]/g;
+    my %hash;
+    for my $sub (@subs) {
+        my @chars = split("", $sub =~ s/[][]//gr);
+        $hash{$sub} = [@chars] unless $hash{$sub};
+    };
+    
+    my $sols = 1;
+    $sols *= $_ for my @entrs = map { 0 + @{$hash{$_}} } my @keys = sort keys %hash;
+    
+    my @pairs = map {
+        my $i = $_;
+        [ map {
+            [$keys[$_], $hash{$keys[$_]}[$i % $entrs[$_]]],
+            ($i = int($i / $entrs[$_])) x 0
+        } 0 .. $#entrs];
+    } 0 .. $sols - 1;
+    
+    my @res;
+    my $i = 0;
+    for my $pair (@pairs) {
+        my $temp = $seq;
+        for my $repl (@{$pair}) {
+            @{$repl}[0] =~ s/\[/\\\[/g;
+            @{$repl}[0] =~ s/\]/\\\]/g;
+            $temp =~ s/@{$repl}[0]/@{$repl}[1]/g;
+        };
+        push @res, $temp;
+    };
+    return uniq(@res);
 };
 
 open my $output, ">:utf8", "delineated_${file_name}.${file_extension}" or die;
 for my $a_IdSequence (@IdSequence_array) {
-    my @delineated = delineate($a_IdSequence->{_sequence});
-    for (my $i = 0; $i < scalar @delineated; $i++) {
-        print $output ">" . $a_IdSequence->{_id} . "_${i}" . "\n";
-        print $output $delineated[$i] . "\n";
+    my @delin;
+    if ($opt eq "na") {
+        @delin = na_delineate($a_IdSequence->{_sequence});
+    } elsif ($opt eq "aa") {
+        @delin = aa_delineate($a_IdSequence->{_sequence});
+    };
+    for (my $i = 0; $i < scalar @delin; $i++) {
+        print $output ">" . $a_IdSequence->{_id} . "_" . ($i + 1) . "\n";
+        print $output $delin[$i] . "\n";
     };
 };
 
