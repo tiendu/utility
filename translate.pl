@@ -68,7 +68,7 @@ sub translate {
         push @arr, $codons{$codon} if $codons{$codon};
     };
     my ($stop_idx) = grep {$arr[$_] eq "*"} 0 .. $#arr;
-    if ($stop_idx + 1 == scalar(@arr) || !defined($stop_idx)) {
+    if (!defined($stop_idx) || $stop_idx + 1 == scalar(@arr)) {
         return join("", @arr);
     } else {
         return "";
