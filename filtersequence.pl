@@ -10,7 +10,7 @@ my (%id_sequence, $id);
 while (<$input>) {
     chomp;
     if (m/\A>/) {
-        ($id) = m/\A>(\S+)/;
+        ($id) = m/\A>(.*)/;
     } else {
         $id_sequence{$id} = uc $_;
     };
@@ -31,4 +31,3 @@ open my $output, ">:utf8", "filtered_${name}.${extension}" or die;
 foreach (@filt_id) {
     print $output join("\n", ">${_}", $id_sequence{$_} . "\n");
 };
-
