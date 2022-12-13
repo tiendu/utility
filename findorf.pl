@@ -1,61 +1,56 @@
 use strict;
+use warnings;
 
-my $functional_profile_path = shift @ARGV;
-my $fasta_single_line_path = shift @ARGV;
+my $info_path = shift @ARGV;
+my $singlelined_fasta_path = shift @ARGV;
 
-my $functional_profile_path_cp = $functional_profile_path;
-$functional_profile_path_cp =~ s/.*\///;
-my $file_name = $1 if = $functional_profile_path_cp =~ /^(.+)\.([^.]+)$/;
+my $info = $info_path =~ s/.*\///r;
+my $name = $1 if $info =~ /^(.+)\.([^.]+)$/;
+my $fasta = $singlelined_fasta_path =~ s/.*\///r;
+my $extension = $1 if $fasta =~ /\.([^.]+)$/;
 
-open my $functional_profile, "<:utf8", $functional_profile_path or die;
-my %positions_hash;
-while (<$functional_profile>) {
+open my $input, "<:utf8", $info_path or die;
+my %info_hash;
+while (<$input>) {
     chomp;
     my @fields = split "\t";
     my $id = $fields[0];
-    my $start = $fields[1];
-    my $end = $fields[2];
-    $positions_hash{$id} = [] unless exists $positions_hash{$id};
-    push @{$positions_hash{$id}}, [$start, $end];
-    last if eof $functional_profile;
+    my ($start, $end, $annotation) = ($fields[1], $fields[2], $fields[3]);
+    $info_hash{$id} = [] unless exists $info_hash{$id};
+    push @{$info_hash{$id}}, [$start, $end, $annotation];
+    last if eof $input;
 };
-close $functional_profile;
+close $input;
 
-my %sequences_hash;
-my $flag = 0;
-my $stored_id;
-open my $fasta, "<:utf8", $fasta_single_line_path or die;
-while (<$fasta>) {
+open my $fasta_file, "<:utf8", $singlelined_fasta_path or die;
+my (%id_sequence_hash, $id);
+while (<$fasta_file>) {
     chomp;
-    if ($_ =~ m/\A>(.+)/) {
-        my @fields = split " ";
-        my $id = $fields[0];
-        $id =~ s/>//;
-        $sequences_hash{$id} = '' unless exists $sequences_hash{$id};
-        $stored_id = $id;
-        $flag = 1;
-    } elsif ($flag) {
-        $sequences_hash{$stored_id} = $_;
-        $flag = 0;
+    if (m/\A>/) {
+        ($id) = m/\A>(\S+)/;
+    } else {
+        $id_sequence_hash{$id} = uc $_;
     };
-    last if eof $fasta;
+    last if eof $fasta_file;
 };
-close $fasta;
+close $fasta_file;
 
-open my $orf_fasta, ">:utf8", "orf_${file_name}.fasta";
-for my $id (sort keys %sequences_hash) {
-    for my $item (@{$positions_hash{$id}}) {
-        my ($start, $end) = @$item;
-        my $seq = $sequences_hash{$id};
+open my $orf_fasta, ">:utf8", "orf_${name}.${extension}" or die;
+for my $id (sort keys %id_sequence_hash) {
+    for my $item (@{$info_hash{$id}}) {
+        my ($start, $end, $annotation) = @$item;
+        my $seq = $id_sequence_hash{$id}; 
+        my $label = ">${id}_${start}_${end}_${annotation}";
+        $label =~ s/\s//;
         if ($start < $end) {
-            my @orf = split(undef, $seq);
+            my @orf = split("", $seq);
             @orf = @orf[$start-1 .. $end-1];
-            print $orf_fasta ">${id}_(${start}:${end})\n";
+            print $orf_fasta "${label}\n";
             print $orf_fasta join("", @orf, "\n");
         } elsif ($start > $end) {
-            my @orf = split(undef, reverse $seq);
+            my @orf = split("", reverse $seq);
             @orf = reverse @orf[$end-1 .. $start-1];
-            print $orf_fasta ">${id}_(${start}:${end})\n";
+            print $orf_fasta "${label}\n";
             print $orf_fasta join("", @orf, "\n");
         };
     };
