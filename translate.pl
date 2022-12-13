@@ -45,10 +45,10 @@ close $input;
 open my $output, ">:utf8", "translated_${file_name}.faa";
 for my $id (sort keys %id_sequence) {
     for my $i (0 .. 2) {
-        my $translated = translate($id_sequence{$id}, $i);
-        my $reverse_translated = translate(reverse_complement($id_sequence{$id}), $i);
-        print $output ">${id} F" . ($i + 1) . "\n" . $translated . "\n" if $translated ne "";
-        print $output ">${id} R" . ($i + 1) . "\n" . $translated . "\n" if $translated ne "";
+        my $fw_trans = translate($id_sequence{$id}, $i);
+        my $rv_trans = translate(reverse_complement($id_sequence{$id}), $i);
+        print $output ">${id}_F" . ($i + 1) . "\n" . $fw_trans . "\n" if $fw_trans ne "";
+        print $output ">${id}_R" . ($i + 1) . "\n" . $rv_trans . "\n" if $rv_trans ne "";
     };
 };
 close $output;
@@ -62,15 +62,14 @@ sub reverse_complement {
 sub translate {
     my $seq = $_[0];
     my $step = $_[1];
-    my @seq_arr;
-    my $idx = 0;
+    my @arr;
     for (my $i = 0; $i + $step <= length($seq); $i += 3) {
         my $codon = substr($seq, $i + $step, 3);
-        push @seq_arr, $codons{$codon} if $codons{$codon};
+        push @arr, $codons{$codon} if $codons{$codon};
     };
-    $idx++ if (grep {/\*/} @seq_arr);
-    if ($idx == 0 || $idx == scalar @seq_arr) {
-        return join("", @seq_arr);
+    my ($stop_idx) = grep {$arr[$_] eq "*"} 0 .. $#arr;
+    if ($stop_idx + 1 == scalar(@arr) || !defined($stop_idx)) {
+        return join("", @arr);
     } else {
         return "";
     };
