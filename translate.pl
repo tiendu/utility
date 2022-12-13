@@ -25,33 +25,33 @@ my %codons = (
     "GGT" => "G", "GGC" => "G", "GGA" => "G", "GGG" => "G",
 );
 
-my $path = shift @ARGV;
-my $file = $path =~ s/.*\///r;
-my ($file_name, $file_extension) = $file =~ /^(.+)\.([^.]+)$/;
-
-open my $input, "<:utf8", $path or die;
-my (%id_sequence, $id);
-while (<$input>) {
-    chomp;
-    if (m/\A>/) {
-        ($id) = m/\A>(\S+)/;
-    } else {
-        $id_sequence{$id} = uc $_;
+my @files = @ARGV;
+for my $file (@files) {
+    open my $input, "<:utf8", $file or die;
+    my (%id_sequence, $id);
+    while (<$input>) {
+        chomp;
+        if (m/\A>/) {
+            ($id) = m/\A>(\S+)/;
+        } else {
+            $id_sequence{$id} = uc $_;
+        };
+        last if eof $input;
     };
-    last if eof $input;
-};
-close $input;
-
-open my $output, ">:utf8", "translated_${file_name}.faa";
-for my $id (sort keys %id_sequence) {
-    for my $i (0 .. 2) {
-        my $fw_trans = translate($id_sequence{$id}, $i);
-        my $rv_trans = translate(reverse_complement($id_sequence{$id}), $i);
-        print $output ">${id}_F" . ($i + 1) . "\n" . $fw_trans . "\n" if $fw_trans ne "";
-        print $output ">${id}_R" . ($i + 1) . "\n" . $rv_trans . "\n" if $rv_trans ne "";
+    close $input;
+    $file =~ s/.*\///; 
+    my ($name, $extension) = $file =~ /^(.+)\.([^.]+)$/;
+    open my $output, ">:utf8", "translated_${name}.faa";
+    for my $id (sort keys %id_sequence) {
+        for my $i (0 .. 2) {
+            my $fw_trans = translate($id_sequence{$id}, $i);
+            my $rv_trans = translate(reverse_complement($id_sequence{$id}), $i);
+            print $output ">${id}_F" . ($i + 1) . "\n" . $fw_trans . "\n" if $fw_trans ne "";
+            print $output ">${id}_R" . ($i + 1) . "\n" . $rv_trans . "\n" if $rv_trans ne "";
+        };
     };
+    close $output;
 };
-close $output;
 
 sub reverse_complement {
     my $seq = $_[0];
