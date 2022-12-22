@@ -13,7 +13,7 @@ my (%id_sequence, $id);
 while (<$input>) {
     chomp;
     if (m/\A>/) {
-        ($id) = m/\A>(.*)/;
+        ($id) = m/\A>(.+)/;
     } else {
         $id_sequence{$id} = uc $_;
     };
