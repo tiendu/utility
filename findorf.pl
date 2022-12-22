@@ -27,7 +27,7 @@ my (%id_sequence_hash, $id);
 while (<$fasta_file>) {
     chomp;
     if (m/\A>/) {
-        ($id) = m/\A>(\S+)/;
+        ($id) = m/\A>(.+)/;
     } else {
         $id_sequence_hash{$id} = uc $_;
     };
