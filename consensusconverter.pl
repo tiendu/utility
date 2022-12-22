@@ -25,7 +25,7 @@ my (@IdSequence_array, $id);
 while (<$input>) {
     chomp;
     if (m/\A>/) {
-        ($id) = m/\A>(\S+)/;
+        ($id) = m/\A>(.+)/;
     } else {
         my $a_IdSequence = IdSequence->new($id, uc $_);
         push @IdSequence_array, $a_IdSequence;
