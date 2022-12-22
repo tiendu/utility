@@ -32,7 +32,7 @@ for my $file (@files) {
     while (<$input>) {
         chomp;
         if (m/\A>/) {
-            ($id) = m/\A>(\S+)/;
+            ($id) = m/\A>(.+)/;
         } else {
             $id_sequence{$id} = uc $_;
         };
