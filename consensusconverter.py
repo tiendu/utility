@@ -17,6 +17,7 @@ class Seq:
         return hash((self.id, self.sequence))
 
 def delineate(string: str, mode: str) -> List[str]:
+    # Nucleotides:
     # A.................Adenine
     # C.................Cytosine
     # G.................Guanine
@@ -33,6 +34,10 @@ def delineate(string: str, mode: str) -> List[str]:
     # V.................A or C or G
     # N.................any base
     # . or -............gap
+    # Amino acids:
+    # Delineated using '[]' to denote alternative amino acids at specific positions.
+    # Example: "A[BC]" -> "AB" and "AC."
+
     conversion = {
         "A": ["A"],
         "C": ["C"],
