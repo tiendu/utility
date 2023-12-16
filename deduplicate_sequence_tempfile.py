@@ -207,7 +207,7 @@ def main():
     elif any(ext in args.input_file for ext in ['.fasta', '.fa', '.fna']):
         file_type = "FASTA"
     else:
-        raise ValueError(f"Unrecognized file extension for {args.input}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).")
+        raise ValueError(f"Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).")
 
     max_threads = os.cpu_count()
     if args.num_threads < 1 or args.num_threads > max_threads:
