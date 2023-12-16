@@ -9,6 +9,9 @@ from typing import List
 import tempfile
 import concurrent.futures
 
+# Setup logging to display messages with INFO level and above
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 @dataclass(frozen=True)
 class Seq:
     id: str
@@ -167,7 +170,7 @@ def main():
     if args.num_threads < 1 or args.num_threads > max_threads:
         logging.warning(f"Adjusting thread count to be between 1 and {max_threads}.")
         args.num_threads = min(max(args.num_threads, 1), max_threads)
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    
     delineate_fasta(args.input_file, args.output_file, args.mode, args.num_threads)
 
 if __name__ == "__main__":
