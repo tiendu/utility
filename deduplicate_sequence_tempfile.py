@@ -211,8 +211,11 @@ def main():
 
     max_threads = os.cpu_count()
     if args.num_threads < 1 or args.num_threads > max_threads:
-        logging.warning(f"Adjusting thread count to be between 1 and {max_threads}.")
+        logging.warning(f"Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}.")
         args.num_threads = min(max(args.num_threads, 1), max_threads)
+    if args.num_threads > len(read_sequences_from_file(args.input_file, file_type)):
+        logging.warning(f"Number of sequences too low. Adjusting thread count to 1.")
+        args.num_threads = 1
 
     deduplicate_fasta(args.input_file, file_type, args.output_file, args.num_threads, args.k_mer, args.similarity_threshold)
 
