@@ -15,7 +15,7 @@ import tempfile
 
 
 # Setup logging to display messages with INFO level and above.
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Data class to represent a sequence.
 @dataclass(frozen=True)
