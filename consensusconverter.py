@@ -119,13 +119,6 @@ def write_sequences_to_fasta(sequences: List[Seq], file_path: str) -> None:
     with open(file_path, 'w') as f:
         for seq in sequences:
             f.write(f">{seq.id}\n{seq.sequence}\n")
-            
-def cleanup_temp_file(file_path: str) -> None:
-    """Remove the specified file and log if there's an error."""
-    try:
-        os.remove(file_path)
-    except Exception as e:
-        logging.warning(f"Unable to delete temporary file {file_path}. Error: {e}")
 
 def delineate_chunk(sequences: List[Seq], mode: str) -> List[Seq]:
     delineated_sequences = []
@@ -143,24 +136,20 @@ def delineate_chunk(sequences: List[Seq], mode: str) -> List[Seq]:
 
 def delineate_fasta(input_file: str, output_file: str, mode: str, num_threads: int) -> None:
     logging.info(f"Reading sequences from {input_file}")
-    with tempfile.NamedTemporaryFile(delete=False, mode='w+t', dir='.') as temp_file:
-        input_sequences = read_sequences_from_fasta(input_file)
-        write_sequences_to_fasta(input_sequences, temp_file.name)
+    input_sequences = read_sequences_from_fasta(input_file)
 
-        total_sequences = len(input_sequences)
-        chunk_size = max(1, total_sequences // num_threads)
-        seq_chunks = [input_sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
-        logging.info(f"Delineating sequences using {num_threads} threads")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(delineate_chunk, mode=mode)
-            futures = [executor.submit(func, chunk) for chunk in seq_chunks]
-            delineated_sequences = []
-            for future in concurrent.futures.as_completed(futures):
-                delineated_sequences.extend(future.result())
-        logging.info(f"Writing delineated sequences to {output_file}")
-        write_sequences_to_fasta(delineated_sequences, output_file)
-        
-        cleanup_temp_file(temp_file.name)
+    total_sequences = len(input_sequences)
+    chunk_size = max(1, total_sequences // num_threads)
+    seq_chunks = [input_sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
+    logging.info(f"Delineating sequences using {num_threads} threads")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        func = partial(delineate_chunk, mode=mode)
+        futures = [executor.submit(func, chunk) for chunk in seq_chunks]
+        delineated_sequences = []
+        for future in concurrent.futures.as_completed(futures):
+            delineated_sequences.extend(future.result())
+    logging.info(f"Writing delineated sequences to {output_file}")
+    write_sequences_to_fasta(delineated_sequences, output_file)
 
 def main():
     parser = argparse.ArgumentParser(description='Delinating sequences.')
