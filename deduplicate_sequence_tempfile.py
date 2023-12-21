@@ -100,8 +100,11 @@ def is_similar_based_on_minhash(sequence1: str, sequence2: str, k: int, threshol
     """Check if two sequences are similar based on their MinHash signatures."""
     min_hash1 = minhash(sequence1, k)
     min_hash2 = minhash(sequence2, k)
-
-    return 1 - abs(min_hash1 - min_hash2) >= threshold
+    
+    # Calculate the similarity score (scaled between 0 and 1)
+    similarity_score = 1 - abs(min_hash1 - min_hash2) / (2**256 - 1)
+    
+    return similarity_score
 
 def deduplicate_chunk(sequences: List[Seq], k: int, similarity_threshold: float, seen_hashes: Dict[str, bool], lock: Lock) -> List[Seq]:
     logging.info(f"Processing a chunk with {len(sequences)} sequences.")
@@ -213,7 +216,7 @@ def main():
     if args.num_threads < 1 or args.num_threads > max_threads:
         logging.warning(f"Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}.")
         args.num_threads = min(max(args.num_threads, 1), max_threads)
-    if args.num_threads > len(read_sequences_from_file(args.input_file, file_type)):
+    if args.num_threads >= len(read_sequences_from_file(args.input_file, file_type)) * 0.1:
         logging.warning(f"Number of sequences too low. Adjusting thread count to 1.")
         args.num_threads = 1
 
