@@ -59,30 +59,42 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
             else:
                 f.write(f"@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n")
 
+@lru_cache(maxsize=None)
 def hash_sequence(sequence: str) -> str:
     """Return a SHA-3 hash of a sequence."""
     return hashlib.sha3_256(sequence.encode()).hexdigest()
 
-# @lru_cache(maxsize=None)
-# def generate_kmers(sequence: str, k: int) -> List[str]:
-#     return [sequence[i:i+k] for i in range(len(sequence) - k + 1)]
+@lru_cache(maxsize=None)
+def generate_kmers(sequence: str, k: int) -> List[str]:
+    return [sequence[i:i+k] for i in range(len(sequence) - k + 1)]
 
-# def is_similar_based_on_kmers(sequence1: str, sequence2: str, k: int, threshold: float) -> bool:
-#     # Generate k-mers for both sequences.
-#     kmers1 = Counter(generate_kmers(sequence1, k))
-#     kmers2 = Counter(generate_kmers(sequence2, k))
+def hash_kmers(kmers: List[str]) -> List[int]:
+    return [hash_sequence(kmer) for kmer in kmers]
 
-#     # Identify the k-mers present in one sequence but missing in the other.
-#     not_in_list2 = list((element, count) for element, count in (kmers1 - kmers2).items())
-#     not_in_list1 = list((element, count) for element, count in (kmers2 - kmers1).items())
-    
-#     # Calculate the total number of k-mers.
-#     total_kmers = set(kmers1.keys()) | set(kmers2.keys())
-    
-#     # Calculate the number of differing k-mers.
-#     count = sum(count for _, count in not_in_list1 + not_in_list2)
+def is_similar_based_on_kmers(sequence1: str, sequence2: str, k: int, threshold: float) -> bool:
+    # Generate k-mers for both sequences.
+    kmers1 = generate_kmers(sequence1, k)
+    kmers2 = generate_kmers(sequence2, k)
 
-#     return count / len(total_kmers) >= threshold if len(total_kmers) > 0 else False
+    # Hash the k-mers.
+    hashed_kmers1 = hash_kmers(kmers1)
+    hashed_kmers2 = hash_kmers(kmers2)
+
+    # Count the occurrences of each hashed k-mer.
+    counts1 = Counter(hashed_kmers1)
+    counts2 = Counter(hashed_kmers2)
+
+    # Identify the hashed k-mers present in one sequence but missing in the other.
+    not_in_list2 = list((element, count) for element, count in (counts1 - counts2).items())
+    not_in_list1 = list((element, count) for element, count in (counts2 - counts1).items())
+
+    # Calculate the total number of hashed k-mers.
+    total_hashed_kmers = set(counts1.keys()) | set(counts2.keys())
+
+    # Calculate the number of differing hashed k-mers.
+    count = sum(count for _, count in not_in_list1 + not_in_list2)
+
+    return count / len(total_hashed_kmers) >= threshold if len(total_hashed_kmers) > 0 else False
 
 @lru_cache(maxsize=None)
 def minhash(sequence: str, k: int) -> int:
