@@ -1,4 +1,3 @@
-import resource
 import os
 import sys
 import concurrent.futures
@@ -78,14 +77,17 @@ def rev_complement(dna_seq: str) -> str:
     rev_comp_seq = ''.join(comp_bases.get(base, base) for base in reversed(dna_seq))
     return rev_comp_seq
 
-def check_primers(sequence: Seq, fwd_primer_regex: Any, rev_primer_regex: Any) -> Tuple[str, str, str]:
+def check_primers(sequence: Seq, fwd_primer_regex: Any, rev_primer_regex: Any) -> Tuple[str, str, str, int, int]:
     fwd_match = fwd_primer_regex.search(sequence.sequence)
     rev_match = rev_primer_regex.search(rev_complement(sequence.sequence))
     if fwd_match and rev_match:
-        return sequence.id, fwd_match.group(), rev_match.group()
-    return None, None, None
+        fwd_match_start, fwd_match_end = fwd_match.span()
+        rev_match_start, rev_match_end = rev_match.span()
+        rev_match_start = len(sequence.sequence) - rev_match_end
+        return sequence.id, fwd_match.group(), rev_match.group(), fwd_match_end, rev_match_start
+    return None, None, None, 0, 0
 
-def check_primers_batch(sequences: List[Seq], fwd_primer_regex: Any, rev_primer_regex: Any) -> List[Tuple[str, str, str]]:
+def check_primers_batch(sequences: List[Seq], fwd_primer_regex: Any, rev_primer_regex: Any) -> List[Tuple[str, str, str, int, int]]:
     return [check_primers(sequence, fwd_primer_regex, rev_primer_regex) for sequence in sequences]
 
 def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
@@ -121,7 +123,7 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
             else:
                 f.write(f"@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n")
 
-def process_file(input_file: str, output_file: str, file_type: str, fwd_primer: str, rev_primer: str, num_threads: int) -> List[Tuple[str, str, str]]:
+def process_file(input_file: str, output_file: str, file_type: str, fwd_primer: str, rev_primer: str, num_threads: int) -> None:
     logging.info(f"Processing file: {input_file}")
     try:
         sequences = read_sequences_from_file(input_file, file_type)
@@ -145,8 +147,8 @@ def process_file(input_file: str, output_file: str, file_type: str, fwd_primer: 
     matched_seqs = []
     for sequence in sequences:
         for match in matched_ids_primers:
-            if sequence.id == match[0]: 
-                matched_seqs.append(Seq(f"{sequence.id}_{match[1]}_{match[2]}", sequence.sequence, sequence.quality))
+            if sequence.id == match[0]:
+                matched_seqs.append(Seq(f"{sequence.id}_{match[1]}_{match[2]}", sequence.sequence[match[3]:match[4]], sequence.quality))
     write_sequences_to_file(matched_seqs, output_file)
     	    
 def main():
