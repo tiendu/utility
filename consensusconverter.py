@@ -119,6 +119,13 @@ def write_sequences_to_fasta(sequences: List[Seq], file_path: str) -> None:
     with open(file_path, 'w') as f:
         for seq in sequences:
             f.write(f">{seq.id}\n{seq.sequence}\n")
+            
+def cleanup_temp_file(file_path: str) -> None:
+    """Remove the specified file and log if there's an error."""
+    try:
+        os.remove(file_path)
+    except Exception as e:
+        logging.warning(f"Unable to delete temporary file {file_path}. Error: {e}")
 
 def delineate_chunk(sequences: List[Seq], mode: str) -> List[Seq]:
     delineated_sequences = []
@@ -150,8 +157,10 @@ def delineate_fasta(input_file: str, output_file: str, mode: str, num_threads: i
             delineated_sequences = []
             for future in concurrent.futures.as_completed(futures):
                 delineated_sequences.extend(future.result())
-    logging.info(f"Writing delineated sequences to {output_file}")
-    write_sequences_to_fasta(delineated_sequences, output_file)
+        logging.info(f"Writing delineated sequences to {output_file}")
+        write_sequences_to_fasta(delineated_sequences, output_file)
+        
+        cleanup_temp_file(temp_file.name)
 
 def main():
     parser = argparse.ArgumentParser(description='Delinating sequences.')
