@@ -6,7 +6,6 @@ from functools import partial
 from dataclasses import dataclass
 from itertools import product, groupby
 from typing import List
-import tempfile
 import concurrent.futures
 
 # Setup logging to display messages with INFO level and above
@@ -20,6 +19,10 @@ class Seq:
         return hash((self.id, self.sequence))
 
 def delineate(string: str, mode: str) -> List[str]:
+    # Check if the string is already in the desired format
+    if (mode == 'nu' and all(char in 'ACGT' for char in string)) or (mode == 'aa' and '\[' not in string and '\]' not in string):
+        return [string]
+
     # Nucleotides:
     # A.................Adenine
     # C.................Cytosine
@@ -138,11 +141,18 @@ def delineate_fasta(input_file: str, output_file: str, mode: str, num_threads: i
     logging.info(f"Reading sequences from {input_file}")
     input_sequences = read_sequences_from_fasta(input_file)
 
+    # Sort sequences based on length in descending order
+    input_sequences.sort(key=lambda x: len(x.sequence), reverse=True)
+
     total_sequences = len(input_sequences)
-    chunk_size = max(1, total_sequences // num_threads)
-    seq_chunks = [input_sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
+    seq_chunks = [[] for _ in range(num_threads)]
+
+    # Distribute sequences in a round-robin fashion
+    for i, seq in enumerate(input_sequences):
+        seq_chunks[i % num_threads].append(seq)
+        
     logging.info(f"Delineating sequences using {num_threads} threads")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
         func = partial(delineate_chunk, mode=mode)
         futures = [executor.submit(func, chunk) for chunk in seq_chunks]
         delineated_sequences = []
@@ -160,10 +170,12 @@ def main():
 
     args = parser.parse_args()
 
-    if not any(ext in args.input_file for ext in ['.fasta', '.fa', '.fna']):
-        raise ValueError(f"Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna).")
+    if not any(ext in args.input_file for ext in ['.fasta', '.fa', '.fna', '.faa']):
+        raise ValueError(f"Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna, .faa).")
+        
     if not any(mode in args.mode for mode in ['nu', 'aa']):
         raise ValueError(f"Mode must be either 'nu' (nucleotides) or 'aa' (amino acids).")
+    
     max_threads = os.cpu_count()
     if args.num_threads < 1 or args.num_threads > max_threads:
         logging.warning(f"Adjusting thread count to be between 1 and {max_threads}.")
