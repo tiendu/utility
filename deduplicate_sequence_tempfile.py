@@ -55,7 +55,10 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
     with open(file_path, 'w') as f:
         for seq in sequences:
             if seq.quality == '':
-                f.write(f">{seq.id}\n{seq.sequence}\n")
+                f.write(f">{seq.id}\n")
+                # Write sequence with a maximum line length of 80 characters
+                for i in range(0, len(seq.sequence), 80):
+                    f.write(seq.sequence[i:i+80] + "\n")
             else:
                 f.write(f"@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n")
 
