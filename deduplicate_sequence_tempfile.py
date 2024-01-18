@@ -63,9 +63,9 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
                 f.write(f"@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n")
 
 @lru_cache(maxsize=None)
-def hash_sequence(sequence: str) -> str:
-    """Return a SHA-3 hash of a sequence."""
-    return hashlib.sha3_256(sequence.encode()).hexdigest()
+def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
+    """Return the hash of a sequence using the specified hash function."""
+    return hash_function(sequence.encode()).hexdigest()
 
 @lru_cache(maxsize=None)
 def generate_kmers(sequence: str, k: int) -> List[str]:
