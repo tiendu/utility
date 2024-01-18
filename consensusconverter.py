@@ -143,8 +143,6 @@ def delineate_fasta(input_file: str, output_file: str, mode: str, num_threads: i
 
     # Sort sequences based on length in descending order
     input_sequences.sort(key=lambda x: len(x.sequence), reverse=True)
-
-    total_sequences = len(input_sequences)
     seq_chunks = [[] for _ in range(num_threads)]
 
     # Distribute sequences in a round-robin fashion
