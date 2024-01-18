@@ -15,7 +15,7 @@ import tempfile
 
 
 # Setup logging to display messages with INFO level and above.
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Data class to represent a sequence.
 @dataclass(frozen=True)
@@ -55,34 +55,49 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
     with open(file_path, 'w') as f:
         for seq in sequences:
             if seq.quality == '':
-                f.write(f">{seq.id}\n{seq.sequence}\n")
+                f.write(f">{seq.id}\n")
+                # Write sequence with a maximum line length of 80 characters
+                for i in range(0, len(seq.sequence), 80):
+                    f.write(seq.sequence[i:i+80] + "\n")
             else:
                 f.write(f"@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n")
 
-def hash_sequence(sequence: str) -> str:
-    """Return a SHA-3 hash of a sequence."""
-    return hashlib.sha3_256(sequence.encode()).hexdigest()
+@lru_cache(maxsize=None)
+def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
+    """Return the hash of a sequence using the specified hash function."""
+    return hash_function(sequence.encode()).hexdigest()
 
-# @lru_cache(maxsize=None)
-# def generate_kmers(sequence: str, k: int) -> List[str]:
-#     return [sequence[i:i+k] for i in range(len(sequence) - k + 1)]
+@lru_cache(maxsize=None)
+def generate_kmers(sequence: str, k: int) -> List[str]:
+    return [sequence[i:i+k] for i in range(len(sequence) - k + 1)]
 
-# def is_similar_based_on_kmers(sequence1: str, sequence2: str, k: int, threshold: float) -> bool:
-#     # Generate k-mers for both sequences.
-#     kmers1 = Counter(generate_kmers(sequence1, k))
-#     kmers2 = Counter(generate_kmers(sequence2, k))
+def hash_kmers(kmers: List[str]) -> List[int]:
+    return [hash_sequence(kmer) for kmer in kmers]
 
-#     # Identify the k-mers present in one sequence but missing in the other.
-#     not_in_list2 = list((element, count) for element, count in (kmers1 - kmers2).items())
-#     not_in_list1 = list((element, count) for element, count in (kmers2 - kmers1).items())
-    
-#     # Calculate the total number of k-mers.
-#     total_kmers = set(kmers1.keys()) | set(kmers2.keys())
-    
-#     # Calculate the number of differing k-mers.
-#     count = sum(count for _, count in not_in_list1 + not_in_list2)
+def is_similar_based_on_kmers(sequence1: str, sequence2: str, k: int, threshold: float) -> bool:
+    # Generate k-mers for both sequences.
+    kmers1 = generate_kmers(sequence1, k)
+    kmers2 = generate_kmers(sequence2, k)
 
-#     return count / len(total_kmers) >= threshold if len(total_kmers) > 0 else False
+    # Hash the k-mers.
+    hashed_kmers1 = hash_kmers(kmers1)
+    hashed_kmers2 = hash_kmers(kmers2)
+
+    # Count the occurrences of each hashed k-mer.
+    counts1 = Counter(hashed_kmers1)
+    counts2 = Counter(hashed_kmers2)
+
+    # Identify the hashed k-mers present in one sequence but missing in the other.
+    not_in_list2 = list((element, count) for element, count in (counts1 - counts2).items())
+    not_in_list1 = list((element, count) for element, count in (counts2 - counts1).items())
+
+    # Calculate the total number of hashed k-mers.
+    total_hashed_kmers = set(counts1.keys()) | set(counts2.keys())
+
+    # Calculate the number of differing hashed k-mers.
+    count = sum(count for _, count in not_in_list1 + not_in_list2)
+
+    return count / len(total_hashed_kmers) >= threshold if len(total_hashed_kmers) > 0 else False
 
 @lru_cache(maxsize=None)
 def minhash(sequence: str, k: int) -> int:
@@ -100,8 +115,11 @@ def is_similar_based_on_minhash(sequence1: str, sequence2: str, k: int, threshol
     """Check if two sequences are similar based on their MinHash signatures."""
     min_hash1 = minhash(sequence1, k)
     min_hash2 = minhash(sequence2, k)
-
-    return 1 - abs(min_hash1 - min_hash2) >= threshold
+    
+    # Calculate the similarity score (scaled between 0 and 1)
+    similarity_score = 1 - abs(min_hash1 - min_hash2) / (2**256 - 1)
+    
+    return similarity_score
 
 def deduplicate_chunk(sequences: List[Seq], k: int, similarity_threshold: float, seen_hashes: Dict[str, bool], lock: Lock) -> List[Seq]:
     logging.info(f"Processing a chunk with {len(sequences)} sequences.")
@@ -142,6 +160,7 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k
             break
 
         logging.info(f"Initial number of sequences: {len(sequences)}")
+
         sequences.sort(key=lambda s: len(s.sequence), reverse=True)
 
         # Split sequences into chunks.
@@ -218,8 +237,11 @@ def main():
 
     max_threads = os.cpu_count()
     if args.num_threads < 1 or args.num_threads > max_threads:
-        logging.warning(f"Adjusting thread count to be between 1 and {max_threads}.")
+        logging.warning(f"Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}.")
         args.num_threads = min(max(args.num_threads, 1), max_threads)
+    if args.num_threads >= len(read_sequences_from_file(args.input_file, file_type)) * 0.1:
+        logging.warning(f"Number of sequences too low. Adjusting thread count to 1.")
+        args.num_threads = 1
 
     deduplicate_fasta(args.input_file, file_type, args.output_file, args.num_threads, args.k_mer, args.similarity_threshold)
 
