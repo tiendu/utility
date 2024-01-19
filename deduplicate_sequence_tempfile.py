@@ -123,34 +123,35 @@ def is_similar_based_on_minhash(sequence1: str, sequence2: str, k: int, threshol
 
 def deduplicate_chunk(sequences: List[Seq], k: int, similarity_threshold: float, seen_hashes: Dict[str, bool], lock: Lock) -> List[Seq]:
     logging.info(f"Processing a chunk with {len(sequences)} sequences.")
-    # sequences.sort(key=lambda s: len(s.sequence), reverse=True)  # sort by length
+    sequences.sort(key=lambda s: len(s.sequence), reverse=True)  # sort by length
     unique_seqs = []
 
     for current_seq in sequences:
         seq_hash = hash_sequence(current_seq.sequence)
 
-        if similarity_threshold == 1.0:
-            # Check if a sequence is already seen using its hash
-            if seq_hash in seen_hashes:
-                continue
-            # Check if a sequence is contained in any of the unique sequences
-            is_contained = any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs)
-            if is_contained:
-                continue
-        else:
-            is_contained = any(is_similar_based_on_minhash(current_seq.sequence, unique_seq.sequence, k, similarity_threshold) for unique_seq in unique_seqs)
-            if is_contained:
+        with lock:
+            if seen_hashes.get(seq_hash, False):
                 continue
 
-        unique_seqs.append(current_seq)
-        with lock:
             seen_hashes[seq_hash] = True
+
+            if similarity_threshold == 1.0:
+                # Check if a sequence is already seen using its hash
+                if any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs):
+                    continue
+            else:
+                # Check if a sequence is contained in any of the unique sequences
+                if any(is_similar_based_on_kmers(current_seq.sequence, unique_seq.sequence, k, similarity_threshold) for unique_seq in unique_seqs):
+                    continue
+
+        unique_seqs.append(current_seq)
 
     logging.info(f"Deduplicated chunk to {len(unique_seqs)} unique sequences.")
     return unique_seqs
 
 def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k: int, similarity_threshold: float, seen_hashes_shared: Manager().dict, lock: Lock) -> List[Seq]:
     deduped_seqs_all = set()
+    temp_file_names = []
 
     while True:
         # Read sequences from the temporary input file
@@ -160,19 +161,13 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k
             break
 
         logging.info(f"Initial number of sequences: {len(sequences)}")
-
-        sequences.sort(key=lambda s: len(s.sequence), reverse=True)
-
-        # Split sequences into chunks.
-        seq_chunks = [[] for _ in range(num_threads)]
-
-        # Distribute sequences in a round-robin fashion
-        for i, seq in enumerate(sequences):
-            seq_chunks[i % num_threads].append(seq)
         
-        # total_sequences = len(sequences)
-        # chunk_size = max(1, total_sequences // num_threads)
-        # seq_chunks = [sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
+        total_sequences = len(sequences)
+        chunk_size = max(1, total_sequences // num_threads)
+        seq_chunks = [sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
+
+        temp_file = tempfile.NamedTemporaryFile(delete=False, mode='w+t', dir='.')
+        temp_file.close()
 
         deduped_seqs = []
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
@@ -192,7 +187,15 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k
         # Otherwise, shuffle the deduplicated sequences and write them to the input temp file
         sequences = list(deduped_seqs_all)
         random.shuffle(sequences)
-        write_sequences_to_file(sequences, input_file)
+        logging.info(f"Wrote {len(sequences)} sequences to temporary file: {temp_file.name}.")	
+
+        input_file = temp_file.name
+        temp_file_names.append(temp_file.name)
+
+    # Remove all temporary files
+    for temp_file in temp_file_names:
+        cleanup_temp_file(temp_file)
+    
     return list(deduped_seqs_all)
 
 def cleanup_temp_file(file_path: str) -> None:
@@ -203,18 +206,13 @@ def cleanup_temp_file(file_path: str) -> None:
         logging.warning(f"Unable to delete temporary file {file_path}. Error: {e}")
 
 def deduplicate_fasta(input_file: str, file_type: str, output_file: str, num_threads: int, k: int, similarity_threshold: float) -> None:
-    with tempfile.NamedTemporaryFile(delete=False, mode='w+t', dir='.') as temp_file:
-        input_sequences = read_sequences_from_file(input_file, file_type)
-        write_sequences_to_file(input_sequences, temp_file.name)
-
-        with Manager() as manager:
-            seen_hashes_shared = manager.dict()
-            lock = manager.Lock()
-            deduped_seqs = recursive_deduplication(input_file=temp_file.name, file_type=file_type, num_threads=num_threads, k=k, similarity_threshold=similarity_threshold, seen_hashes_shared=seen_hashes_shared, lock=lock)
-        write_sequences_to_file(deduped_seqs, output_file)
-        logging.info(f"Wrote {len(deduped_seqs)} unique sequences to {output_file}.")
-
-        cleanup_temp_file(temp_file.name)
+    with Manager() as manager:
+        seen_hashes_shared = manager.dict()
+        lock = manager.Lock()
+        deduped_seqs = recursive_deduplication(input_file=input_file, file_type=file_type, num_threads=num_threads, k=k, similarity_threshold=similarity_threshold, seen_hashes_shared=seen_hashes_shared, lock=lock)
+    
+    write_sequences_to_file(deduped_seqs, output_file)
+    logging.info(f"Wrote {len(deduped_seqs)} unique sequences to {output_file}.")
 
 def main():
     """Main function that handles command-line arguments and invokes the deduplication."""
