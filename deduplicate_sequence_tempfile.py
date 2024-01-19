@@ -187,7 +187,9 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k
         # Otherwise, shuffle the deduplicated sequences and write them to the input temp file
         sequences = list(deduped_seqs_all)
         random.shuffle(sequences)
-        logging.info(f"Wrote {len(sequences)} sequences to temporary file: {temp_file.name}.")	
+        
+        logging.info(f"Temporarily writing {len(sequences)} sequences to {temp_file.name}.")
+        write_sequences_to_file(sequences, temp_file.name)
 
         input_file = temp_file.name
         temp_file_names.append(temp_file.name)
@@ -212,7 +214,7 @@ def deduplicate_fasta(input_file: str, file_type: str, output_file: str, num_thr
         deduped_seqs = recursive_deduplication(input_file=input_file, file_type=file_type, num_threads=num_threads, k=k, similarity_threshold=similarity_threshold, seen_hashes_shared=seen_hashes_shared, lock=lock)
     
     write_sequences_to_file(deduped_seqs, output_file)
-    logging.info(f"Wrote {len(deduped_seqs)} unique sequences to {output_file}.")
+    logging.info(f"Wrote {len(deduped_seqs)} final deduplicated sequences to {output_file}")
 
 def main():
     """Main function that handles command-line arguments and invokes the deduplication."""
