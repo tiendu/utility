@@ -7,10 +7,10 @@ import random
 from collections import Counter
 from multiprocessing import Manager, Lock
 from functools import partial, lru_cache
-from itertools import groupby, product
+from itertools import groupby
 from dataclasses import dataclass
 import concurrent.futures
-from typing import List, Set, Tuple, Dict
+from typing import List, Dict
 import tempfile
 
 
