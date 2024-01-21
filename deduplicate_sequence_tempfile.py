@@ -5,14 +5,18 @@ import logging
 import hashlib
 import random
 from collections import Counter
-from multiprocessing import Manager, Lock
-from functools import partial, lru_cache
+from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
+from typing import List
 import concurrent.futures
-from typing import List, Dict
 import tempfile
 
+
+# Constants
+FASTQ_EXTENSIONS = ['.fastq', '.fq']
+FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna']
+LINE_LENGTH = 80
 
 # Setup logging to display messages with INFO level and above.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,17 +61,15 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
             if seq.quality == '':
                 f.write(f">{seq.id}\n")
                 # Write sequence with a maximum line length of 80 characters
-                for i in range(0, len(seq.sequence), 80):
+                for i in range(0, len(seq.sequence), LINE_LENGTH):
                     f.write(seq.sequence[i:i+80] + "\n")
             else:
                 f.write(f"@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n")
 
-@lru_cache(maxsize=None)
 def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     """Return the hash of a sequence using the specified hash function."""
     return hash_function(sequence.encode()).hexdigest()
 
-@lru_cache(maxsize=None)
 def generate_kmers(sequence: str, k: int) -> List[str]:
     return [sequence[i:i+k] for i in range(len(sequence) - k + 1)]
 
@@ -99,58 +101,48 @@ def is_similar_based_on_kmers(sequence1: str, sequence2: str, k: int, threshold:
 
     return count / len(total_hashed_kmers) >= threshold if len(total_hashed_kmers) > 0 else False
 
-@lru_cache(maxsize=None)
-def minhash(sequence: str, k: int) -> int:
-    """Generate a MinHash signature for a sequence using SHA-3."""
-    min_hash_value = float('inf')
+# def minhash(sequence: str, k: int) -> int:
+#     """Generate a MinHash signature for a sequence using SHA-3."""
+#     min_hash_value = float('inf')
 
-    for i in range(len(sequence) - k + 1):
-        kmer = sequence[i:i + k]
-        hash_value = int(hashlib.sha3_256(kmer.encode()).hexdigest(), 16)
-        min_hash_value = min(min_hash_value, hash_value)
+#     for i in range(len(sequence) - k + 1):
+#         kmer = sequence[i:i + k]
+#         hash_value = int(hashlib.sha3_256(kmer.encode()).hexdigest(), 16)
+#         min_hash_value = min(min_hash_value, hash_value)
 
-    return min_hash_value
+#     return min_hash_value
 
-def is_similar_based_on_minhash(sequence1: str, sequence2: str, k: int, threshold: float) -> bool:
-    """Check if two sequences are similar based on their MinHash signatures."""
-    min_hash1 = minhash(sequence1, k)
-    min_hash2 = minhash(sequence2, k)
+# def is_similar_based_on_minhash(sequence1: str, sequence2: str, k: int, threshold: float) -> bool:
+#     """Check if two sequences are similar based on their MinHash signatures."""
+#     min_hash1 = minhash(sequence1, k)
+#     min_hash2 = minhash(sequence2, k)
     
-    # Calculate the similarity score (scaled between 0 and 1)
-    similarity_score = 1 - abs(min_hash1 - min_hash2) / (2**256 - 1)
+#     # Calculate the similarity score (scaled between 0 and 1)
+#     similarity_score = 1 - abs(min_hash1 - min_hash2) / (2**256 - 1)
     
-    return similarity_score
+#     return similarity_score
 
-def deduplicate_chunk(sequences: List[Seq], k: int, similarity_threshold: float, seen_hashes: Dict[str, bool], lock: Lock) -> List[Seq]:
-    logging.info(f"Processing a chunk with {len(sequences)} sequences.")
+def deduplicate_chunk(sequences: List[Seq], k: int, similarity_threshold: float) -> List[Seq]:
+    logging.info(f"Processing a chunk with {len(sequences)} sequences")
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)  # sort by length
     unique_seqs = []
 
     for current_seq in sequences:
-        seq_hash = hash_sequence(current_seq.sequence)
-
-        with lock:
-            if seen_hashes.get(seq_hash, False):
+        if similarity_threshold == 1.0:
+            # Check if a sequence is already seen
+            if any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs):
                 continue
-
-            seen_hashes[seq_hash] = True
-
-            if similarity_threshold == 1.0:
-                # Check if a sequence is already seen using its hash
-                if any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs):
-                    continue
-            else:
-                # Check if a sequence is contained in any of the unique sequences
-                if any(is_similar_based_on_kmers(current_seq.sequence, unique_seq.sequence, k, similarity_threshold) for unique_seq in unique_seqs):
-                    continue
-
+        else:
+            if any(is_similar_based_on_kmers(current_seq.sequence, unique_seq.sequence, k, similarity_threshold) for unique_seq in unique_seqs):
+                continue
         unique_seqs.append(current_seq)
 
-    logging.info(f"Deduplicated chunk to {len(unique_seqs)} unique sequences.")
+    logging.info(f"Deduplicated chunk to {len(unique_seqs)} unique sequences")
+
     return unique_seqs
 
-def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k: int, similarity_threshold: float, seen_hashes_shared: Manager().dict, lock: Lock) -> List[Seq]:
-    deduped_seqs_all = set()
+def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k: int, similarity_threshold: float) -> List[Seq]:
+    deduped_dict = dict()
     temp_file_names = []
 
     while True:
@@ -171,25 +163,27 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k
 
         deduped_seqs = []
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, k=k, similarity_threshold=similarity_threshold, seen_hashes=seen_hashes_shared, lock=lock)
+            func = partial(deduplicate_chunk, k=k, similarity_threshold=similarity_threshold)
             futures = [executor.submit(func, chunk) for chunk in seq_chunks if chunk]
+            concurrent.futures.wait(futures)
 
             for future in concurrent.futures.as_completed(futures):
                 deduped_seqs.extend(future.result())
 
         # Add deduplicated sequences to the main set
-        deduped_seqs_all.update(set(deduped_seqs))
+        for seq in deduped_seqs:
+            deduped_dict[seq.sequence] = seq
 
         # If no sequences were deduplicated in this iteration, we're done
-        if len(deduped_seqs_all) == len(sequences):
+        if len(deduped_dict) == len(sequences):
             break
 
         # Otherwise, shuffle the deduplicated sequences and write them to the input temp file
-        sequences = list(deduped_seqs_all)
-        random.shuffle(sequences)
+        deduped_seqs = list(deduped_dict.values())
+        random.shuffle(deduped_seqs)
         
-        logging.info(f"Temporarily writing {len(sequences)} sequences to {temp_file.name}.")
-        write_sequences_to_file(sequences, temp_file.name)
+        logging.info(f"Temporarily writing {len(deduped_seqs)} sequences to {temp_file.name}")
+        write_sequences_to_file(deduped_seqs, temp_file.name)
 
         input_file = temp_file.name
         temp_file_names.append(temp_file.name)
@@ -198,7 +192,7 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k
     for temp_file in temp_file_names:
         cleanup_temp_file(temp_file)
     
-    return list(deduped_seqs_all)
+    return deduped_seqs
 
 def cleanup_temp_file(file_path: str) -> None:
     """Remove the specified file and log if there's an error."""
@@ -208,13 +202,14 @@ def cleanup_temp_file(file_path: str) -> None:
         logging.warning(f"Unable to delete temporary file {file_path}. Error: {e}")
 
 def deduplicate_fasta(input_file: str, file_type: str, output_file: str, num_threads: int, k: int, similarity_threshold: float) -> None:
-    with Manager() as manager:
-        seen_hashes_shared = manager.dict()
-        lock = manager.Lock()
-        deduped_seqs = recursive_deduplication(input_file=input_file, file_type=file_type, num_threads=num_threads, k=k, similarity_threshold=similarity_threshold, seen_hashes_shared=seen_hashes_shared, lock=lock)
+    deduped_seqs = recursive_deduplication(input_file=input_file, file_type=file_type, num_threads=num_threads, k=k, similarity_threshold=similarity_threshold)
     
-    write_sequences_to_file(deduped_seqs, output_file)
-    logging.info(f"Wrote {len(deduped_seqs)} final deduplicated sequences to {output_file}")
+    # Final scan using deduplicate_chunk to ensure all sequences are deduplicated
+    logging.info(f"Final scan to deduplicate {len(deduped_seqs)} sequences")
+    deduped_seqs_final = deduplicate_chunk(deduped_seqs, k, similarity_threshold)
+
+    write_sequences_to_file(deduped_seqs_final, output_file)
+    logging.info(f"Wrote {len(deduped_seqs_final)} final deduplicated sequences to {output_file}")
 
 def main():
     """Main function that handles command-line arguments and invokes the deduplication."""
@@ -227,20 +222,23 @@ def main():
 
     args = parser.parse_args()
 
+    if not os.path.exists(args.input_file):
+        raise ValueError(f"The input file '{args.input_file}' does not exist.")
+    
     file_type = ''
-    if any(ext in args.input_file for ext in ['.fastq', '.fq']):
+    if any(ext in args.input_file for ext in FASTQ_EXTENSIONS):
         file_type = "FASTQ"
-    elif any(ext in args.input_file for ext in ['.fasta', '.fa', '.fna']):
+    elif any(ext in args.input_file for ext in FASTA_EXTENSIONS):
         file_type = "FASTA"
     else:
         raise ValueError(f"Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).")
 
     max_threads = os.cpu_count()
     if args.num_threads < 1 or args.num_threads > max_threads:
-        logging.warning(f"Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}.")
+        logging.warning(f"Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}")
         args.num_threads = min(max(args.num_threads, 1), max_threads)
     if args.num_threads >= len(read_sequences_from_file(args.input_file, file_type)) * 0.1:
-        logging.warning(f"Number of sequences too low. Adjusting thread count to 1.")
+        logging.warning(f"Number of sequences too low, thread count adjusted to 1")
         args.num_threads = 1
 
     deduplicate_fasta(args.input_file, file_type, args.output_file, args.num_threads, args.k_mer, args.similarity_threshold)
