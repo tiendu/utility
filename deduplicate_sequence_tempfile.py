@@ -125,21 +125,21 @@ def is_similar_based_on_kmers(sequence1: str, sequence2: str, k: int, threshold:
 def deduplicate_chunk(sequences: List[Seq], k: int, similarity_threshold: float) -> List[Seq]:
     logging.info(f"Processing a chunk with {len(sequences)} sequences")
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)  # sort by length
-    unique_seqs = []
+    unique_seqs = dict()
 
     for current_seq in sequences:
         if similarity_threshold == 1.0:
             # Check if a sequence is already seen
-            if any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs):
+            if any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs.values()):
                 continue
         else:
-            if any(is_similar_based_on_kmers(current_seq.sequence, unique_seq.sequence, k, similarity_threshold) for unique_seq in unique_seqs):
+            if any(is_similar_based_on_kmers(current_seq.sequence, unique_seq.sequence, k, similarity_threshold) for unique_seq in unique_seqs.values()):
                 continue
-        unique_seqs.append(current_seq)
+        unique_seqs[hash_sequence(current_seq.sequence)] = current_seq
 
     logging.info(f"Deduplicated chunk to {len(unique_seqs)} unique sequences")
 
-    return unique_seqs
+    return list(unique_seqs.values())
 
 def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k: int, similarity_threshold: float) -> List[Seq]:
     deduped_dict = dict()
@@ -172,7 +172,7 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int, k
 
         # Add deduplicated sequences to the main set
         for seq in deduped_seqs:
-            deduped_dict[seq.sequence] = seq
+            deduped_dict[hash_sequence(seq.sequence)] = seq
 
         # If no sequences were deduplicated in this iteration, we're done
         if len(deduped_dict) == len(sequences):
