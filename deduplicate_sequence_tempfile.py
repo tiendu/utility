@@ -41,7 +41,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
                 header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
-                name = header_line[1:]  # Removing "@" character
+                name = header_line[1:]  # remove "@" character
                 seq = sequence_line.upper()
                 qual = quality_line.upper()
                 sequences.append(Seq(name, seq, qual))
@@ -50,7 +50,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == ">"))
             for header in faiter:
                 headerstr = next(header).strip()
-                name = headerstr[1:]  # Removing ">" character
+                name = headerstr[1:]  # remove ">" character
                 seq = "".join(s.strip().upper() for s in next(faiter))
                 sequences.append(Seq(name, seq))
     return sequences
@@ -60,7 +60,7 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
         for seq in sequences:
             if seq.quality == '':
                 f.write(f">{seq.id}\n")
-                # Write sequence with a maximum line length of 80 characters
+                # Write sequence with a defined line length
                 for i in range(0, len(seq.sequence), LINE_LENGTH):
                     f.write(seq.sequence[i:i+80] + "\n")
             else:
@@ -128,13 +128,16 @@ def deduplicate_chunk(sequences: List[Seq], k: int, similarity_threshold: float)
     unique_seqs = dict()
 
     for current_seq in sequences:
-        if similarity_threshold == 1.0:
-            # Check if a sequence is already seen
-            if any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs.values()):
-                continue
-        else:
+        # Check if a sequence is already seen
+        if any(current_seq.sequence in unique_seq.sequence for unique_seq in unique_seqs.values()):
+            continue
+
+        # Check for similarity only if the threshold is below 1.0
+        if similarity_threshold < 1.0:
+            # Use non-exact match comparison
             if any(is_similar_based_on_kmers(current_seq.sequence, unique_seq.sequence, k, similarity_threshold) for unique_seq in unique_seqs.values()):
                 continue
+
         unique_seqs[hash_sequence(current_seq.sequence)] = current_seq
 
     logging.info(f"Deduplicated chunk to {len(unique_seqs)} unique sequences")
@@ -222,9 +225,16 @@ def main():
 
     args = parser.parse_args()
 
+    # Validate input and output.
     if not os.path.exists(args.input_file):
         raise ValueError(f"The input file '{args.input_file}' does not exist.")
-    
+    try:
+        with open(args.output_file, 'w'):
+            pass
+    except Exception as e:
+        raise ValueError(f"Error creating output file '{args.output_file}': {e}")
+
+    # Check file type.
     file_type = ''
     if any(ext in args.input_file for ext in FASTQ_EXTENSIONS):
         file_type = "FASTQ"
@@ -233,6 +243,7 @@ def main():
     else:
         raise ValueError(f"Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).")
 
+    # Validate CPUs.
     max_threads = os.cpu_count()
     if args.num_threads < 1 or args.num_threads > max_threads:
         logging.warning(f"Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}")
