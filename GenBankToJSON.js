@@ -30,6 +30,7 @@ const GENBANK_ANNOTATION_KEY = {
     FEATURES_TAG: 'FEATURES',
     BASE_COUNT_TAG: 'BASE COUNT',
     ORIGIN_TAG: 'ORIGIN',
+    CONTIG_TAG: 'CONTIG',
     END_SEQUENCE_TAG: '//',
 };
 
@@ -83,6 +84,9 @@ function genbankToJson(sequence) {
                 break;
             case GENBANK_ANNOTATION_KEY.ORIGIN_TAG:
                 parseOrigin(line, lineFieldName);
+                break;
+            case GENBANK_ANNOTATION_KEY.CONTIG_TAG:
+                parseContig(line, lineFieldName);
                 break;
             case GENBANK_ANNOTATION_KEY.DEFINITION_TAG:
             case GENBANK_ANNOTATION_KEY.ACCESSION_TAG:
@@ -140,16 +144,23 @@ function genbankToJson(sequence) {
 
     function postProcessCurSeq() {
         if (result && result.features) {
-        for (let i = 0; i < result.features.length; i++) {
-            result.features[i] = postProcessGenbankFeature(result.features[i]);
-        }
+            for (let i = 0; i < result.features.length; i++) {
+                result.features[i] = postProcessGenbankFeature(result.features[i]);
+            }
         }
     }
 
     function parseOrigin(line, key) {
         if (key !== GENBANK_ANNOTATION_KEY.ORIGIN_TAG) {
-        let newLine = line.replace(/[\s]*[0-9]*/g, '');
-        result.sequence += newLine;
+            let newLine = line.replace(/[\s]*[0-9]*/g, '');
+            result.sequence += newLine;
+        }
+    }
+
+    function parseContig(line, key) {
+        if (key !== GENBANK_ANNOTATION_KEY.CONTIG_TAG) {
+            let newLine = line.replace(/[\s]*[0-9]*/g, '');
+            result.sequence += newLine;
         }
     }
 
@@ -219,17 +230,17 @@ function genbankToJson(sequence) {
         let strand;
         // FOR THE MAIN FEATURES LOCATION/QUALIFIER LINE
         if (key === GENBANK_ANNOTATION_KEY.FEATURES_TAG) {
-        lastLineWasFeaturesTag = true;
-        return;
+            lastLineWasFeaturesTag = true;
+            return;
         }
 
         if (lastLineWasFeaturesTag) {
-        // we need to get the indentation of feature locations
-        featureLocationIndentation = getLengthOfWhiteSpaceBeforeStartOfLetters(
-            line,
-        );
-        // set lastLineWasFeaturesTag to false
-        lastLineWasFeaturesTag = false;
+            // we need to get the indentation of feature locations
+            featureLocationIndentation = getLengthOfWhiteSpaceBeforeStartOfLetters(
+                line,
+            );
+            // set lastLineWasFeaturesTag to false
+            lastLineWasFeaturesTag = false;
         }
         // FOR LOCATION && QUALIFIER LINES
         if (isFeatureLineRunon(line, featureLocationIndentation)) {
@@ -445,11 +456,11 @@ function genbankToJson(sequence) {
     }
 
     function getLengthOfWhiteSpaceBeforeStartOfLetters(string) {
-    let match = /^\s*/.exec(string);
-    if (match !== null) {
-        return match[0].length;
-    } else {
-        return 0;
+        let match = /^\s*/.exec(string);
+        if (match !== null) {
+            return match[0].length;
+        } else {
+            return 0;
     }
 }
 
@@ -464,7 +475,7 @@ const [, , genbankFile] = process.argv;
 fs.readFile(genbankFile, 'utf8', (err, data) => {
     if(err) {
         console.error('Error reading file:', err);
-    return;
+        return;
     }
     
     const result = genbankToJson(data);
