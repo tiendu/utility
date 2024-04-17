@@ -39,24 +39,24 @@ def parse_sequence(input_file: str) -> str:
                 sequence += ''.join(line.strip().split()[1:])
     return sequence.upper()
 
-def extract_sequence(features: dict, sequence: str, output_file: str) -> None:
+def extract_sequence(features, sequence, output_file):
     reversed_sequence = reverse_complement(sequence)
     with open(output_file, 'w') as f:
         for location, annotations in features.items():
             extract = ''
             header = ''
             if 'complement' in location:
-                location = re.search(r'\d+\.\.\d+', location).group()
-                start, end = map(int, location.split('..'))
-                extract = reversed_sequence[start - 1 : end][::-1]
+                location_extracted = re.search(r'\d+\.\.\d+', location).group()
+                start, end = map(int, location_extracted.split('..'))
+                extract = reversed_sequence[start - 1 : end]
             elif 'join' in location:
                 locations = re.findall(r'\d+\.\.\d+', location)
-                for location in locations:
-                    start, end = map(int, location.split('..'))
+                for location_extracted in locations:
+                    start, end = map(int, location_extracted.split('..'))
                     extract += sequence[start - 1 : end]
             elif re.match(r'\d+\.\.\d+', location):
                 start, end = map(int, location.split('..'))
-                extract = sequence[start - 1:end]
+                extract = sequence[start - 1 : end]
             for id, annotation in annotations.items():
                 header = id + '|' + location
                 header += '|' + '|'.join(annotation)
