@@ -26,6 +26,8 @@ class SequenceAlignment:
         if gap_extension is not None:
             self.gap_extension = gap_extension
 
+@dataclass
+class GlobalAlignment(SequenceAlignment):
     def align(self) -> Tuple[str, str, str, int]:
         # Initialize the matrix
         rows = len(self.sequence1) + 1
@@ -145,9 +147,9 @@ class LocalAlignment(SequenceAlignment):
         return alignment1, alignment_symbols, alignment2, max_score
 
 def main(sequence1: str, sequence2: str) -> None:
-    global_alignment = SequenceAlignment(sequence1, sequence2)
+    global_alignment = GlobalAlignment(sequence1, sequence2)
     global_alignment.set_params(match=3, mismatch=-2, gap_opening=-3, gap_extension=-2)
-    aligned_sequence1, alignment_symbols, aligned_sequence2, global_score = global_alignment.align()
+    global_aligned_sequence1, global_alignment_symbols, global_aligned_sequence2, global_score = global_alignment.align()
 
     local_alignment = LocalAlignment(sequence1, sequence2)
     local_alignment.set_params(match=3, mismatch=-2, gap_opening=-3, gap_extension=-2)
