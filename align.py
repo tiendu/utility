@@ -156,9 +156,9 @@ def main(sequence1: str, sequence2: str) -> None:
     local_aligned_sequence1, local_alignment_symbols, local_aligned_sequence2, local_score = local_alignment.align()
 
     print('Global Alignment\n')
-    print(aligned_sequence1)
-    print(alignment_symbols)
-    print(aligned_sequence2)
+    print(global_aligned_sequence1)
+    print(global_alignment_symbols)
+    print(global_aligned_sequence2)
     print('Alignment Score:', global_score)
     print('=' * 40)  # Separator
     print('Local Alignment\n')
