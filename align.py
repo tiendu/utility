@@ -1,6 +1,7 @@
+import re
 import sys
 from dataclasses import dataclass
-from typing import Tuple
+from typing import List, Tuple
 
 @dataclass
 class SequenceAlignment:
@@ -146,6 +147,20 @@ class LocalAlignment(SequenceAlignment):
 
         return alignment1, alignment_symbols, alignment2, max_score
 
+    def find_local_alignment_location(self, alignment1, alignment2) -> List[int]:
+        # Remove gap characters from the aligned sequences
+        aligned_sequence1_without_gaps = alignment1.replace('-', '')
+        aligned_sequence2_without_gaps = alignment2.replace('-', '')
+
+        # Find the starting position of the aligned sequence in the original sequence
+        match1 = re.search(aligned_sequence1_without_gaps, self.sequence1)
+        match2 = re.search(aligned_sequence2_without_gaps, self.sequence2)
+        
+        if match1 and match2:
+            start1 = match1.start()
+            start2 = match2.start()
+            return [start1 + 1, start2 + 1]
+
 def main(sequence1: str, sequence2: str) -> None:
     global_alignment = GlobalAlignment(sequence1, sequence2)
     global_alignment.set_params(match=3, mismatch=-2, gap_opening=-3, gap_extension=-2)
@@ -154,6 +169,7 @@ def main(sequence1: str, sequence2: str) -> None:
     local_alignment = LocalAlignment(sequence1, sequence2)
     local_alignment.set_params(match=3, mismatch=-2, gap_opening=-3, gap_extension=-2)
     local_aligned_sequence1, local_alignment_symbols, local_aligned_sequence2, local_score = local_alignment.align()
+    local_alignment_position1, local_alignment_position2 = local_alignment.find_local_alignment_location(local_aligned_sequence1, local_aligned_sequence2)
 
     print('Global Alignment\n')
     print(global_aligned_sequence1)
@@ -166,6 +182,8 @@ def main(sequence1: str, sequence2: str) -> None:
     print(local_alignment_symbols)
     print(local_aligned_sequence2)
     print('Alignment Score:', local_score)
+    print('Aligned Sequence 1 Position:', local_alignment_position1)
+    print('Aligned Sequence 2 Position:', local_alignment_position2)
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
