@@ -65,13 +65,13 @@ function genbankToJson(sequence) {
         } else if (isSubKey) {
             subFieldType = lineFieldName;
         }
-        // IGNORE LINES: DO NOT EVEN PROCESS
+        // Ignore these lines
         if (line.trim() === '' || lineFieldName === ';') {
             continue;
         }
 
         if (!hasFoundLocus && fieldName !== GENBANK_ANNOTATION_KEY.LOCUS_TAG) {
-            throw new Error('Genbank files must start with a LOCUS tag so this must not be a genbank');
+            throw new Error('No LOCUS tag was found!');
         }
 
         switch (fieldName) {
@@ -125,16 +125,8 @@ function genbankToJson(sequence) {
     return resultsArray;
 
     function endSeq() {
-        // do some post processing clean-up
+        // Do some post processing clean-up
         postProcessCurSeq();
-        // push the result into the resultsArray
-        resultsArray.push(result);
-    }
-
-    function endSeq() {
-        // do some post processing clean-up
-        postProcessCurSeq();
-        // push the result into the resultsArray
         resultsArray.push(result);
     }
 
@@ -165,48 +157,59 @@ function genbankToJson(sequence) {
     }
 
     function parseLocus(line) {
+        // Initialize the result object with default values
         result = {
-        features: [],
-        name: 'Untitled sequence',
-        sequence: '',
-        references: [],
+            features: [],
+            name: 'Untitled sequence',
+            sequence: '',
+            references: [],
         };
-        line = removeFieldName(GENBANK_ANNOTATION_KEY.LOCUS_TAG, line);
-        const m = line.match(
-            /^([^\s]+)\s+(\d+)\s+bp\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*([^\s]+)?$/,
-        );
-        let locusName = m[1];
-        let size = +m[2];
-        let moleculeType = m[3];
-        let circular = m[4] === 'circular';
+
+        // Remove the LOCUS tag and trim the line
+        line = removeFieldName(GENBANK_ANNOTATION_KEY.LOCUS_TAG, line).trim();
+        // Extract information using regular expressions
+        const m = line.match(/^(\S+)\s+(\d+)\s+bp\s+(\S+)\s+(\S+)\s+(\S+)\s*(\S+)?$/);
+        if (!m) {
+            throw new Error('Invalid LOCUS line format');
+        }
+
+        // Extract individual fields
+        const locusName = m[1];
+        const size = +m[2];
+        const moleculeType = m[3];
+        const circular = m[4] === 'circular';
         const seq = result;
         let dateStr = '';
+
+        // Determine the date string
         if (!m[6]) {
-        dateStr = m[5];
+            dateStr = m[5];
         } else {
-        seq.genbankDivision = m[5];
-        dateStr = m[6];
+            seq.genbankDivision = m[5];
+            dateStr = m[6];
         }
+
+        // Parse the date string
+        const dateMatch = dateStr.match(/^(\d{2})-(.{3})-(\d{4})$/);
+        if (!dateMatch) {
+            throw new Error('Invalid date format');
+        }
+        const date = new Date(+dateMatch[3], MONTHS.indexOf(dateMatch[2].toUpperCase()), +dateMatch[1], 12, 0, 0, 0);
+
+        // Populate the result object with parsed values
         seq.circular = circular;
         seq.moleculeType = moleculeType;
-        const dateMatch = dateStr.match(/^(\d{2})-(.{3})-(\d{4})$/);
-        const date = new Date();
-        date.setFullYear(+dateMatch[3]);
-        date.setUTCMonth(MONTHS.indexOf(dateMatch[2].toUpperCase()));
-        date.setDate(+dateMatch[1]);
-        date.setUTCHours(12);
-        date.setMinutes(0);
-        date.setSeconds(0);
-        date.setMilliseconds(0);
         seq.date = date.toISOString();
         seq.name = locusName;
         seq.size = size;
+
+        return result;
     }
 
     function removeFieldName(fName, line) {
         line = line.replace(/^\s*/, '');
         if (line.indexOf(fName) === 0) {
-        line = line.replace(fName, '');
+            line = line.replace(fName, '');
         }
         return line.trim();
     }
@@ -215,75 +218,71 @@ function genbankToJson(sequence) {
         const refs = result.references;
         let lastRef = refs[refs.length - 1];
         if (!subType) {
-        parseMultiLineField(
-            GENBANK_ANNOTATION_KEY.REFERENCE_TAG,
-            line,
-            'description',
-            lastRef,
-        );
+            parseMultiLineField(
+                GENBANK_ANNOTATION_KEY.REFERENCE_TAG,
+                line,
+                'description',
+                lastRef,
+            );
         } else {
-        parseMultiLineField(subType, line, subType.toLowerCase(), lastRef);
+            parseMultiLineField(subType, line, subType.toLowerCase(), lastRef);
         }
     }
 
     function parseFeatures(line, key, val) {
         let strand;
-        // FOR THE MAIN FEATURES LOCATION/QUALIFIER LINE
+        // For the main features Location/Qualifiers line 
         if (key === GENBANK_ANNOTATION_KEY.FEATURES_TAG) {
             lastLineWasFeaturesTag = true;
             return;
         }
 
         if (lastLineWasFeaturesTag) {
-            // we need to get the indentation of feature locations
-            featureLocationIndentation = getLengthOfWhiteSpaceBeforeStartOfLetters(
-                line,
-            );
-            // set lastLineWasFeaturesTag to false
+            // Get the indentation of feature locations
+            featureLocationIndentation = getLengthOfWhiteSpaceBeforeStartOfLetters(line, );
+            // Reset lastLineWasFeaturesTag
             lastLineWasFeaturesTag = false;
         }
-        // FOR LOCATION && QUALIFIER LINES
+        // For Location/Qualifiers lines
         if (isFeatureLineRunon(line, featureLocationIndentation)) {
-        // the line is a continuation of the above line
-        if (lastLineWasLocation) {
-            // the last line was a location, so the run-on line is expected to be a feature location as well
-            parseFeatureLocation(line.trim());
-            lastLineWasLocation = true;
-        } else {
-            // the last line was a note
-            if (currentFeatureNote) {
-            // append to the currentFeatureNote
-            currentFeatureNote[
-                currentFeatureNote.length - 1
-            ] += line.trim().replace(/"/g, '');
-            }
-            lastLineWasLocation = false;
-        }
-        } else {
-        // New Element/Qualifier lines. Not runon lines.
-        if (isNote(line)) {
-            // is a new Feature Element (e.g. source, CDS) in the form of  "[\s] KEY  SEQLOCATION"
-            // is a FeatureQualifier in the /KEY="BLAH" format; could be multiple per Element
-            // Check that feature did not get skipped for missing location
-            if (getCurrentFeature()) {
-            parseFeatureNote(line);
-            lastLineWasLocation = false;
-            }
-        } else {
-            // the line is a location, so we make a new feature from it
-            if (val.match(/complement/g)) {
-            strand = -1;
+            // The line is a continuation of the above line
+            if (lastLineWasLocation) {
+                // The last line was a location, so the run-on line is expected to be a feature location too
+                parseFeatureLocation(line.trim());
+                lastLineWasLocation = true;
             } else {
-            strand = 1;
+                // The last line was a note
+                if (currentFeatureNote) {
+                    // Append to the currentFeatureNote
+                    currentFeatureNote[
+                        currentFeatureNote.length - 1
+                    ] += line.match(/translation/) ? 
+                    line.trim().replace(/"/g, '') : 
+                    ` ${line.trim().replace(/"/g, '')}`;
+                }
+                lastLineWasLocation = false;
             }
+        } else {
+            // New Element/Qualifier lines. Not runon lines.
+            if (isNote(line)) {
+                // Is a new Feature Element (e.g. source, CDS) in the form of  "[\s] KEY  SEQLOCATION"
+                // Is a Feature Qualifier in the /KEY="<VALUE>" format; could be multiple per Element
+                // Check that feature did not get skipped for missing location
+                if (getCurrentFeature()) {
+                    parseFeatureNote(line);
+                    lastLineWasLocation = false;
+                }
+            } else {
+                // The line is a location, so make a new feature from it
+                strand = val.match(/complement/g) ? -1 : 1; // Determine the strand
 
-            newFeature();
-            let feat = getCurrentFeature();
-            feat.type = key;
-            feat.strand = strand;
+                newFeature();
+                let feat = getCurrentFeature();
+                feat.type = key;
+                feat.strand = strand;
 
-            parseFeatureLocation(val);
-            lastLineWasLocation = true;
+                parseFeatureLocation(val);
+                lastLineWasLocation = true;
             }
         }
     }
@@ -295,66 +294,75 @@ function genbankToJson(sequence) {
     }
 
     function isNote(line) {
-        let qual = false;
-        /* if (line.charAt(21) === "/") {//T.H. Hard coded method
-            qual = true;
-            }*/
-        if (line.trim().charAt(0).match(/\//)) {
-        // searches based on looking for / in beginning of line
-        qual = true;
-        } else if (line.match(/^[\s]*\/[\w]+=[\S]+/)) {
-        // searches based on "   /key=BLAH" regex
-        qual = true;
+        // Trim leading and trailing whitespace
+        line = line.trim();
+    
+        // Check if the line starts with a slash (/)
+        if (line.startsWith('/')) {
+            return true;
         }
-        return qual;
+    
+        // Check if the line matches the pattern "/key=value"
+        if (line.match(/^\/[\w-]+=/)) {
+            return true;
+        }
+    
+        // If none of the above conditions are met, it's not a note
+        return false;
     }
 
     function parseFeatureLocation(locStr) {
+        // Trim any leading or trailing whitespace
         locStr = locStr.trim();
-        let locArr = [];
-        locStr.replace(/(\d+)/g, function (string, match) {
-        locArr.push(match);
-        });
-        let feat = getCurrentFeature();
-        feat.start = +locArr[0];
-        feat.end = locArr[1] === undefined ? +locArr[0] : +locArr[1];
+    
+        // Use a regular expression to extract numbers from the location string
+        const matches = locStr.match(/\d+/g);
+    
+        // If there are no matches, return early
+        if (!matches || matches.length === 0) {
+            return;
+        }
+    
+        // Parse the start and end positions from the matches
+        const start = +matches[0];
+        const end = matches.length > 1 ? +matches[1] : start;
+    
+        // Get the current feature
+        const feat = getCurrentFeature();
+    
+        // Update the feature's start and end positions
+        feat.start = start;
+        feat.end = end;
     }
 
     function parseFeatureNote(line) {
-        let newLine, lineArr;
-
-        newLine = line.trim();
-        newLine = newLine.replace(/^\/|"$/g, '');
-        lineArr = newLine.split(/="|=/);
-
-        let val = lineArr[1];
-
-        if (val) {
-        val = val.replace(/\\/g, ' ');
-
-        if (line.match(/="/g)) {
-            val = val.replace(/".*/g, '');
-        } else if (val.match(/^\d+$/g)) {
-            val = +val;
-        }
-        }
-        let key = lineArr[0];
-        let currentNotes = getCurrentFeature().notes;
+        // Trim leading and trailing whitespace and remove leading slashes and quotes
+        line = line.trim().replace(/^\/|"$/g, '');
+    
+        // Split the line into key-value pairs
+        const [key, rawValue] = line.split(/="|=/);
+    
+        // Process the value
+        let value = rawValue ? rawValue.replace(/\\/g, ' ').replace(/".*/g, '') : '';
+        value = isNaN(value) ? value : +value; // Convert to number if possible
+    
+        // Get the current feature's notes
+        const currentNotes = getCurrentFeature().notes;
+    
+        // Update the notes object with the key-value pair
         if (currentNotes[key]) {
-        // array already exists, so push value into it
-        currentNotes[key].push(val);
+            currentNotes[key].push(value);
         } else {
-        // array doesn't exist yet, so create it and populate it with the value
-        currentNotes[key] = [val];
+            currentNotes[key] = [value];
         }
+    
+        // Set the current feature note
         currentFeatureNote = currentNotes[key];
     }
 
     function getLineFieldName(line) {
         let arr;
-        line = line.trim();
-
-        arr = line.split(/[\s]+/);
+        arr = line.trim().split(/[\s]+/);
 
         return arr[0];
     }
@@ -364,25 +372,29 @@ function genbankToJson(sequence) {
         let fieldValue = removeFieldName(fName, line);
         r[resultKey] = r[resultKey] ? `${r[resultKey]} ` : '';
         r[resultKey] += fieldValue;
+
+        return r
     }
 
     function getLineVal(line) {
-        let arr;
-
+        line = line.trim(); // Trim leading and trailing whitespace
+    
+        // If the line doesn't contain '=', return the trimmed line
         if (line.indexOf('=') < 0) {
-        line = line.replace(/^[\s]*[\S]+[\s]+|[\s]+$/, '');
-        line = line.trim();
-        return line;
+            return line;
         } else {
-        arr = line.split(/=/);
-        return arr[1];
+            // Split the line by '='
+            const arr = line.split('=');
+            // Join all parts after the first '=' as the value
+            const value = arr.slice(1).join('=').trim();
+            return value;
         }
     }
 
     function isKeyword(line) {
         let isKey = false;
         if (line.substr(0, 10).match(/^[\S]+/)) {
-        isKey = true;
+            isKey = true;
         }
         return isKey;
     }
@@ -390,80 +402,82 @@ function genbankToJson(sequence) {
     function isSubKeyword(line) {
         let isSubKey = false;
         if (line.substr(0, 10).match(/^[\s]+[\S]+/)) {
-        isSubKey = true;
+            isSubKey = true;
         }
         return isSubKey;
     }
 
     function postProcessGenbankFeature(feat) {
         if (feat.notes.label) {
-        feat.name = feat.notes.label[0];
+            feat.name = feat.notes.label[0];
         } else if (feat.notes.gene) {
-        feat.name = feat.notes.gene[0];
+            feat.name = feat.notes.gene[0];
         } else if (feat.notes.ApEinfo_label) {
-        feat.name = feat.notes.ApEinfo_label[0];
+            feat.name = feat.notes.ApEinfo_label[0];
         } else if (feat.notes.name) {
-        feat.name = feat.notes.name[0];
+            feat.name = feat.notes.name[0];
         } else if (feat.notes.organism) {
-        feat.name = feat.notes.organism[0];
+            feat.name = feat.notes.organism[0];
         } else if (feat.notes.locus_tag) {
-        feat.name = feat.notes.locus_tag[0];
+            feat.name = feat.notes.locus_tag[0];
         } else if (feat.notes.note) {
-        feat.name = feat.notes.note[0];
+            feat.name = feat.notes.note[0];
         } else {
-        feat.name = 'Untitled Feature';
+            feat.name = 'Untitled Feature';
         }
         feat.name = typeof feat.name === 'string' ? feat.name : String(feat.name);
         return feat;
     }
-    }
-
     function isFeatureLineRunon(line, featureLocationIndentation) {
-    let indentationOfLine = getLengthOfWhiteSpaceBeforeStartOfLetters(line);
-    if (featureLocationIndentation === indentationOfLine) {
-        // the feature location indentation calculated right after the feature tag
-        // cannot be the same as the indentation of the line
-        //
+        const indentationOfLine = getLengthOfWhiteSpaceBeforeStartOfLetters(line);
+            // Check if the indentation of the line matches the expected feature location indentation
+        if (featureLocationIndentation === indentationOfLine) {
+            // If the indentations match, it's not a run-on line
+            /*
+            The feature location indentation calculated right after the feature tag
+            Cannot be the same as the indentation of the lineß
+            FEATURES             Location/Qualifiers
+                 rep_origin      complement(1074..3302)
+            01234  <-- this is the indentation we're talking about
+            */
+            return false;
+        }
+        
+        // Trim the line and check if it starts with a slash (/)
+        const trimmedLine = line.trim();
+        if (trimmedLine.startsWith('/')) {
+            // If the trimmed line starts with a slash, it's not a run-on line
+            return false;
+        }
+
+        // If none of the above conditions are met, it's a run-on line
+        return true;
+        // Run-on line example:
         // FEATURES             Location/Qualifiers
         //     rep_origin      complement(1074..3302)
-        // 01234  <-- this is the indentation we're talking about
-        return false; // the line is NOT a run on
-    }
-
-    let trimmed = line.trim();
-    if (trimmed.charAt(0).match(/\//)) {
-        // the first char in the trimmed line cannot be a /
-        return false; // the line is NOT a run on
-    }
-    // the line is a run on
-    return true;
-    // run-on line example:
-    // FEATURES             Location/Qualifiers
-    //     rep_origin      complement(1074..3302)
-    //                 /label=pSC101**
-    //                 /note="REP_ORIGIN REP_ORIGIN pSC101* aka pMPP6, gives plasm
-    //                 id number 3 -4 copies per cell, BglII site in pSC101* ori h <--run-on line!
-    //                 as been dele ted by quick change agatcT changed to agatcA g <--run-on line!
-    //                 iving pSC101* * pSC101* aka pMPP6, gives plasmid number 3-4 <--run-on line!
-    //                 copies p er cell, BglII site in pSC101* ori has been delet  <--run-on line!
-    //                 ed by quic k change agatcT changed to agatcA giving pSC101* <--run-on line!
-    //                 * [pBbS0a-RFP]"                                             <--run-on line!
-    //                 /gene="SC101** Ori"
-    //                 /note="pSC101* aka pMPP6, gives plasmid number 3-4 copies p
-    //                 er cell, BglII site in pSC101* ori has been deleted by qui
-    //                 c k change agatcT changed to agatcA giving pSC101**"
-    //                 /vntifkey="33"
+        //                 /label=pSC101**
+        //                 /note="REP_ORIGIN REP_ORIGIN pSC101* aka pMPP6, gives plasm
+        //                 id number 3 -4 copies per cell, BglII site in pSC101* ori h <--run-on line!
+        //                 as been dele ted by quick change agatcT changed to agatcA g <--run-on line!
+        //                 iving pSC101* * pSC101* aka pMPP6, gives plasmid number 3-4 <--run-on line!
+        //                 copies p er cell, BglII site in pSC101* ori has been delet  <--run-on line!
+        //                 ed by quic k change agatcT changed to agatcA giving pSC101* <--run-on line!
+        //                 * [pBbS0a-RFP]"                                             <--run-on line!
+        //                 /gene="SC101** Ori"
+        //                 /note="pSC101* aka pMPP6, gives plasmid number 3-4 copies p
+        //                 er cell, BglII site in pSC101* ori has been deleted by qui
+        //                 c k change agatcT changed to agatcA giving pSC101**"
+        //                 /vntifkey="33"
     }
 
     function getLengthOfWhiteSpaceBeforeStartOfLetters(string) {
-        let match = /^\s*/.exec(string);
-        if (match !== null) {
-            return match[0].length;
-        } else {
-            return 0;
+        // Match the whitespace characters before the start of letters
+        let match = string.match(/^\s*/);
+        
+        // Return the length of matched whitespace (or 0 if there's no match)
+        return match ? match[0].length : 0;
     }
 }
-
 
 if (process.argv.length < 3) {
     console.error('Insufficient arguments. Usage: node script.js file.gbk');
