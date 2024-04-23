@@ -48,7 +48,7 @@ def extract_sequence(features, sequence, output_file):
             if 'complement' in location:
                 location_extracted = re.search(r'\d+\.\.\d+', location).group()
                 start, end = map(int, location_extracted.split('..'))
-                extract = reversed_sequence[start - 1 : end]
+                extract = reversed_sequence[len(sequence) - end : len(sequence) + 1 - start]
             elif 'join' in location:
                 locations = re.findall(r'\d+\.\.\d+', location)
                 for location_extracted in locations:
