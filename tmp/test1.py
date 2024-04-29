@@ -1,7 +1,23 @@
 down_arrow = "↓"
-def print_changes(before, after, width=5):
-    # Print the sequences and annotations
-    for i in range(0, len(before), width):
+def print_changes(before, after, start_pos=1, end_pos=None, width=5):
+    # Check if the strings are of equal length
+    if len(before) != len(after):
+        raise ValueError("Error: strings are not of equal length")
+    
+    # Set the end position to the length of the strings if not specified
+    if end_pos is None:
+        end_pos = max(len(before), len(after))
+
+    # Ensure start and end positions are within bounds
+    start_pos = max(1, start_pos)
+    end_pos = min(end_pos, max(len(before), len(after)))
+
+    # Adjust width if the specified range is within the width of the chunks
+    if end_pos - start_pos + 1 < width:
+        width = end_pos - start_pos + 1
+
+    # Print the strings and annotations within the specified range
+    for i in range(start_pos - 1, end_pos, width):
         before_chunk = before[i:i+width]
         after_chunk = after[i:i+width]
         
@@ -21,16 +37,16 @@ def print_changes(before, after, width=5):
         # Print the chunk with annotations
         print(f'{i+1} {before_chunk}')
         print(f'  {annotation_chunk}')
-        print(f'{i+1} {after_chunk}')
+        print(f'{i+1} {after_chunk}\n')
 
 # Example usage
-before_seq = "ATGCACCTG"
-after_seq = "ATGCTCCTG"
-print_changes(before_seq, after_seq)
+before = "ATGCACCTGATGCACCTGATGCACCTG"
+after = "ATGCTCCTGATGCACCTGATGCACCTG"
+print_changes(before, after, width=20)
 
 """
-before_seq = "ATGCACCTG"
-after_seq = "ATGCTCCTG"
+after = "ATGCACCTG"
+before = "ATGCTCCTG"
 width = 4
 Expected output:
 1 ATGC
