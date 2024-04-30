@@ -97,15 +97,13 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set) ->
         uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
         uniq_kmers.update(hash_sequence(kmer) for kmer in kmers)
 
-    logging.info(f'Deduplication of the chunk completed. Unique sequences: {len(uniq_seqs)}')
+    logging.info(f'Chunk deduplication complete. Unique sequences: {len(uniq_seqs)}')
 
     return list(uniq_seqs.values())
         
-def deduplicate_sequences_concurrently(input_file: str, file_type: str, num_threads: int) -> List[Seq]:
+def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
     '''Perform recursive deduplication of sequences using multiple threads.'''
-    # Read sequences from the input file.
-    logging.info(f'Reading sequences from file: {input_file}...')
-    sequences = read_sequences_from_file(input_file, file_type)
+    sequences = sequences
     # Initialize shared dictionaries and sets for storing unique sequences and kmers.
     shared_sequences = dict()
     shared_kmers = set()
@@ -155,15 +153,6 @@ def deduplicate_sequences_concurrently(input_file: str, file_type: str, num_thre
     
     return list(shared_sequences.values())
 
-def deduplicate_sequences_and_write_output(input_file: str, file_type: str, output_file: str, num_threads: int) -> None:
-    '''Deduplicate FASTA/FASTQ sequences and write the result to an output file.'''
-    logging.info(f'Deduplicating sequences in {input_file} to {output_file} using {num_threads} threads...')
-    deduped_seqs = deduplicate_sequences_concurrently(input_file=input_file, file_type=file_type, num_threads=num_threads)
-
-    # Write deduplicated sequences to the output file.
-    write_sequences_to_file(deduped_seqs, output_file)
-    logging.info(f'Finished. Wrote {len(deduped_seqs)} final deduplicated sequences to: {output_file}')
-
 def main():
     '''Main function that handles command-line arguments and invokes the deduplication.'''
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
@@ -200,8 +189,16 @@ def main():
         logging.warning(f'Number of sequences too low, thread count adjusted to 1')
         args.num_threads = 1
 
-    # Perform deduplication and write the result to the output file.
-    deduplicate_sequences_and_write_output(args.input_file, file_type, args.output_file, args.num_threads)
+    # Read sequences from the input file.
+    logging.info(f'Reading sequences from file: {args.input_file}...')
+    sequences = read_sequences_from_file(args.input_file, file_type)
+
+    # Perform deduplication.
+    deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads)
+
+    # Write deduplicated sequences to the output file.
+    logging.info(f'Finished. Wrote {len(deduplicated_sequences)} final deduplicated sequences to: {args.output_file}')
+    write_sequences_to_file(deduplicated_sequences, args.output_file)
 
 if __name__ == '__main__':
     main()
