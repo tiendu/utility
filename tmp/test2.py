@@ -195,14 +195,10 @@ def main():
         logging.warning(f'Number of sequences too low, thread count adjusted to 1')
         args.num_threads = 1
 
-    # Read sequences from the input file.
-    logging.info(f'Reading sequences from file: {args.input_file}...')
-    sequences = read_sequences_from_file(args.input_file, file_type)
-
     # Perform deduplication.
     deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads)
 
-    # Write to the output file.
+    # Write deduplicated sequences to the output file.
     logging.info(f'Finished. Wrote {len(deduplicated_sequences)} final deduplicated sequences to: {args.output_file}')
     write_sequences_to_file(deduplicated_sequences, args.output_file)
 
