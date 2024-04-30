@@ -56,7 +56,9 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
     return sequences
 
 def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
-    with open(file_path, 'w') as f:
+    opener = gzip.open if file_path.endswith('.gz') else open
+    
+    with opener(file_path, 'wt') as f:
         for seq in sequences:
             if seq.quality == '':
                 f.write(f'>{seq.id}\n')
