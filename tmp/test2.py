@@ -28,9 +28,11 @@ class Seq:
     sequence: str
     quality: str = ''
     def __hash__(self):
+        '''Define a custom hash function for the dataclass.'''
         return hash((self.id, self.sequence, self.quality))
 
 def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
+    '''Read sequences from a file and return them as a list of Seq objects.'''
     sequences = []
 
     # Determine the appropriate file opening mode based on the file extension.
@@ -38,6 +40,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
 
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
+            # Group lines into sets of 4 (header, sequence, '+', quality).
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
                 header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
@@ -47,6 +50,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
                 sequences.append(Seq(name, seq, qual))
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
+            # Group lines into sequences based on '>' character indicating header lines.
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
             for header in faiter:
                 headerstr = next(header).strip()
@@ -56,6 +60,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
     return sequences
 
 def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
+    '''Write sequences to a file.'''
     opener = gzip.open if file_path.endswith('.gz') else open
     
     with opener(file_path, 'wt') as f:
@@ -77,7 +82,8 @@ def generate_kmers(string: str, k: int) -> List[str]:
     return [string[i:i+k] for i in range(len(string) - k + 1)]
 
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set) -> List[Seq]:
-    logging.info(f'Processing a chunk with {len(sequences)} sequences')
+    '''Deduplicate sequences within a chunk.'''
+    logging.info(f'Deduplicating a chunk with {len(sequences)} sequences...')
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)
 
     if sequences:
@@ -91,13 +97,16 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set) ->
         uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
         uniq_kmers.update(hash_sequence(kmer) for kmer in kmers)
 
-    logging.info(f'Deduplicated chunk to {len(uniq_seqs)} unique sequences')
+    logging.info(f'Deduplication of the chunk completed. Unique sequences: {len(uniq_seqs)}')
 
     return list(uniq_seqs.values())
         
-def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -> List[Seq]:
-    # Read sequences from the temporary input file
+def deduplicate_sequences_concurrently(input_file: str, file_type: str, num_threads: int) -> List[Seq]:
+    '''Perform recursive deduplication of sequences using multiple threads.'''
+    # Read sequences from the input file.
+    logging.info(f'Reading sequences from file: {input_file}...')
     sequences = read_sequences_from_file(input_file, file_type)
+    # Initialize shared dictionaries and sets for storing unique sequences and kmers.
     shared_sequences = dict()
     shared_kmers = set()
 
@@ -106,7 +115,8 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -
             break
 
         logging.info(f'Initial number of sequences: {len(sequences)}')
-        
+
+        # Split sequences into chunks for parallel processing.
         total_sequences = len(sequences)
         chunk_size = max(1, total_sequences // num_threads)
         remainder = total_sequences % num_threads
@@ -115,11 +125,12 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -
         for i in range(num_threads):
             end_idx = start_idx + chunk_size
             if i < remainder:
-                end_idx += 1  # add one more sequence to account for remainder
+                end_idx += 1  # Add one more sequence to account for remainder
             seq_chunks.append(sequences[start_idx:end_idx])
             start_idx = end_idx
 
         deduped_seqs = []
+        # Process each chunk concurrently using multiple threads.
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers)
             futures = [executor.submit(func, chunk) for chunk in seq_chunks if chunk]
@@ -128,15 +139,15 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -
             for future in concurrent.futures.as_completed(futures):
                 deduped_seqs.extend(future.result())
 
-        # Add deduplicated sequences to the main set
+        # Add deduplicated sequences to the main set.
         for seq in deduped_seqs:
             shared_sequences[hash_sequence(seq.sequence)] = seq
 
-        # If no sequences were deduplicated in this iteration, we're done
+        # If no sequences were deduplicated in this iteration, we're done.
         if len(shared_sequences) == len(sequences):
             break
 
-        # Otherwise, shuffle the partially deduplicated sequences and repeat the process
+        # Otherwise, shuffle the partially deduplicated sequences and repeat the process.
         deduped_seqs = list(shared_sequences.values())
         random.shuffle(deduped_seqs)
         
@@ -144,11 +155,14 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -
     
     return list(shared_sequences.values())
 
-def deduplicate_fasta(input_file: str, file_type: str, output_file: str, num_threads: int) -> None:
-    deduped_seqs = recursive_deduplication(input_file=input_file, file_type=file_type, num_threads=num_threads)
+def deduplicate_sequences_and_write_output(input_file: str, file_type: str, output_file: str, num_threads: int) -> None:
+    '''Deduplicate FASTA/FASTQ sequences and write the result to an output file.'''
+    logging.info(f'Deduplicating sequences in {input_file} to {output_file} using {num_threads} threads...')
+    deduped_seqs = deduplicate_sequences_concurrently(input_file=input_file, file_type=file_type, num_threads=num_threads)
 
+    # Write deduplicated sequences to the output file.
     write_sequences_to_file(deduped_seqs, output_file)
-    logging.info(f'Wrote {len(deduped_seqs)} final deduplicated sequences to {output_file}')
+    logging.info(f'Finished. Wrote {len(deduped_seqs)} final deduplicated sequences to: {output_file}')
 
 def main():
     '''Main function that handles command-line arguments and invokes the deduplication.'''
@@ -159,7 +173,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate input and output.
+    # Validate input and output file paths.
     if not os.path.exists(args.input_file):
         raise ValueError(f'The input file "{args.input_file}" does not exist.')
     try:
@@ -168,7 +182,7 @@ def main():
     except Exception as e:
         raise ValueError(f'Error creating output file "{args.output_file}": {e}')
 
-    # Check file type.
+    # Check the file type.
     file_type = ''
     if any(ext in args.input_file for ext in FASTQ_EXTENSIONS):
         file_type = 'FASTQ'
@@ -177,7 +191,7 @@ def main():
     else:
         raise ValueError(f'Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).')
 
-    # Validate CPUs.
+    # Validate the number of threads.
     max_threads = os.cpu_count()
     if args.num_threads < 1 or args.num_threads > max_threads:
         logging.warning(f'Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}')
@@ -186,7 +200,8 @@ def main():
         logging.warning(f'Number of sequences too low, thread count adjusted to 1')
         args.num_threads = 1
 
-    deduplicate_fasta(args.input_file, file_type, args.output_file, args.num_threads)
+    # Perform deduplication and write the result to the output file.
+    deduplicate_sequences_and_write_output(args.input_file, file_type, args.output_file, args.num_threads)
 
 if __name__ == '__main__':
     main()
