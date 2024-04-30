@@ -185,7 +185,13 @@ def main():
     if args.num_threads < 1 or args.num_threads > max_threads:
         logging.warning(f'Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}')
         args.num_threads = min(max(args.num_threads, 1), max_threads)
-    if args.num_threads >= len(read_sequences_from_file(args.input_file, file_type)) * 0.1:
+
+    # Read sequences from the input file.
+    logging.info(f'Reading sequences from file: {args.input_file}...')
+    sequences = read_sequences_from_file(args.input_file, file_type)
+
+    # Re-adjust the number of threads according to the number of sequences.
+    if args.num_threads >= len(sequences) * 0.1:
         logging.warning(f'Number of sequences too low, thread count adjusted to 1')
         args.num_threads = 1
 
@@ -196,7 +202,7 @@ def main():
     # Perform deduplication.
     deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads)
 
-    # Write deduplicated sequences to the output file.
+    # Write to the output file.
     logging.info(f'Finished. Wrote {len(deduplicated_sequences)} final deduplicated sequences to: {args.output_file}')
     write_sequences_to_file(deduplicated_sequences, args.output_file)
 
