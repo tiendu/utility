@@ -74,30 +74,30 @@ def generate_kmers(string: str, k: int) -> List[str]:
     '''Split a string into k-mers of length k.'''
     return [string[i:i+k] for i in range(len(string) - k + 1)]
 
-def deduplicate_chunk(sequences: List[Seq], unique_seqs: dict) -> List[Seq]:
+def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set) -> List[Seq]:
     logging.info(f'Processing a chunk with {len(sequences)} sequences')
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)
 
-    seen_substrings = set()
     if sequences:
         min_length = len(sequences[-1].sequence)
     
     for current_seq in sequences:
         kmers = generate_kmers(current_seq.sequence, min_length)
-        if any(substring in seen_substrings for substring in generate_kmers(current_seq.sequence, min_length)):
+        if any(hash_sequence(kmer) in uniq_kmers for kmer in kmers):
             continue
 
-        unique_seqs[hash_sequence(current_seq.sequence)] = current_seq
-        seen_substrings.update(kmers)
+        uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
+        uniq_kmers.update(hash_sequence(kmer) for kmer in kmers)
 
-    logging.info(f'Deduplicated chunk to {len(unique_seqs)} unique sequences')
+    logging.info(f'Deduplicated chunk to {len(uniq_seqs)} unique sequences')
 
-    return list(unique_seqs.values())
+    return list(uniq_seqs.values())
         
 def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -> List[Seq]:
     # Read sequences from the temporary input file
     sequences = read_sequences_from_file(input_file, file_type)
-    deduped_dict = dict()
+    shared_sequences = dict()
+    shared_kmers = set()
 
     while True:
         if not sequences:
@@ -119,7 +119,7 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -
 
         deduped_seqs = []
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, unique_seqs=deduped_dict)
+            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers)
             futures = [executor.submit(func, chunk) for chunk in seq_chunks if chunk]
             concurrent.futures.wait(futures)
 
@@ -128,19 +128,19 @@ def recursive_deduplication(input_file: str, file_type: str, num_threads: int) -
 
         # Add deduplicated sequences to the main set
         for seq in deduped_seqs:
-            deduped_dict[hash_sequence(seq.sequence)] = seq
+            shared_sequences[hash_sequence(seq.sequence)] = seq
 
         # If no sequences were deduplicated in this iteration, we're done
-        if len(deduped_dict) == len(sequences):
+        if len(shared_sequences) == len(sequences):
             break
 
         # Otherwise, shuffle the partially deduplicated sequences and repeat the process
-        deduped_seqs = list(deduped_dict.values())
+        deduped_seqs = list(shared_sequences.values())
         random.shuffle(deduped_seqs)
         
         sequences = deduped_seqs
     
-    return list(deduped_dict.values())
+    return list(shared_sequences.values())
 
 def deduplicate_fasta(input_file: str, file_type: str, output_file: str, num_threads: int) -> None:
     deduped_seqs = recursive_deduplication(input_file=input_file, file_type=file_type, num_threads=num_threads)
