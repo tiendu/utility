@@ -85,7 +85,7 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
     '''Deduplicate sequences within a chunk.'''
     logging.info(f'Deduplicating a chunk with {len(sequences)} sequences...')
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)
-    uniq_kmers = set()
+    uniq_kmer_hashes = set()
 
     if sequences:
         min_length = len(sequences[-1].sequence)
@@ -93,11 +93,12 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
 
     for current_seq in sequences:
         kmers = generate_kmers(current_seq.sequence, min_length)
-        if any(kmer in uniq_kmers for kmer in kmers):
+        kmer_hashes = {hash_sequence(kmer) for kmer in kmers}
+        if all(hash_val in uniq_kmer_hashes for hash_val in kmer_hashes):
             continue
 
         uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
-        uniq_kmers.update(kmers)
+        uniq_kmer_hashes.update(kmer_hashes)
 
     logging.info(f'Chunk deduplication complete. Unique sequences: {len(uniq_seqs)}')
 
