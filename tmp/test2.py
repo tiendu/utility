@@ -81,21 +81,23 @@ def generate_kmers(string: str, k: int) -> List[str]:
     '''Split a string into k-mers of length k.'''
     return [string[i:i+k] for i in range(len(string) - k + 1)]
 
-def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set) -> List[Seq]:
+def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
     '''Deduplicate sequences within a chunk.'''
     logging.info(f'Deduplicating a chunk with {len(sequences)} sequences...')
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)
+    uniq_kmers = set()
 
     if sequences:
         min_length = len(sequences[-1].sequence)
-    
+    logging.info(f'Using k-mers of minimum length: {min_length}')
+
     for current_seq in sequences:
         kmers = generate_kmers(current_seq.sequence, min_length)
-        if any(hash_sequence(kmer) in uniq_kmers for kmer in kmers):
+        if any(kmer in uniq_kmers for kmer in kmers):
             continue
 
         uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
-        uniq_kmers.update(hash_sequence(kmer) for kmer in kmers)
+        uniq_kmers.update(kmers)
 
     logging.info(f'Chunk deduplication complete. Unique sequences: {len(uniq_seqs)}')
 
@@ -104,9 +106,8 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set) ->
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
     '''Perform recursive deduplication of sequences using multiple threads.'''
     sequences = sequences
-    # Initialize shared dictionaries and sets for storing unique sequences and kmers.
+    # Initialize shared dictionaries for storing unique sequences.
     shared_sequences = dict()
-    shared_kmers = set()
 
     while True:
         if not sequences:
@@ -130,7 +131,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         deduped_seqs = []
         # Process each chunk concurrently using multiple threads.
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers)
+            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences)
             futures = [executor.submit(func, chunk) for chunk in seq_chunks if chunk]
             concurrent.futures.wait(futures)
 
