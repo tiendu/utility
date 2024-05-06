@@ -49,27 +49,47 @@ def translate(dna_seq: str) -> str:
     
     return protein_seq
 
-def find_longest_orf(dna_seq: str) -> str:
+def find_orf(dna_seq: str) -> list:
     start_codons = ['ATG', 'TTG', 'CTG', 'GTG']
     stop_codons = ['TAA', 'TAG', 'TGA']
 
     orfs = []
-    for strand in (dna_seq, reverse_complement(dna_seq)):
+    for strand, direction in ((dna_seq, 1), (reverse_complement(dna_seq), -1)):
         for i in range(len(strand)):
             if strand[i:i+3] in start_codons:
                 orf = ""
+                start_index = i
                 for j in range(i, len(strand), 3):
                     codon = strand[j:j+3]
                     if codon in stop_codons:
-                        orfs.append(orf)
+                        orf += codon
+                        end_index = j + 3
+                        if direction == 1:
+                            orfs.append((start_index, end_index, direction, orf))
+                        else:
+                            orfs.append((len(strand) - end_index, len(strand) - start_index, direction, orf))
                         break
                     orf += codon
 
-    if orfs:
-        longest_orf = max(orfs, key=len)
-        return longest_orf
-    else:
-        return ''
+    # Filter out overlapping ORFs
+    filtered_orfs = set()
+    for i, orf1 in enumerate(orfs):
+        overlap = False
+        for j, orf2 in enumerate(orfs):
+            if i != j and \
+            orf1[0] < orf2[1] and \
+            orf1[1] > orf2[0] and \
+            orf1[2] == orf2[2]:
+                overlap = True
+                if len(orf1[3]) > len(orf2[3]):
+                    filtered_orfs.add(orf1)
+                else:
+                    filtered_orfs.add(orf2)
+                break
+        if not overlap:
+            filtered_orfs.add(orf1)
+
+    return sorted(filtered_orfs, key=lambda x: (x[0], x[1], x[2], len(x[3])))
 
 def codon_bias(dna_seq: str) -> dict:
     # Dictionary to store codon frequencies
@@ -90,10 +110,7 @@ def codon_bias(dna_seq: str) -> dict:
     
     return codon_bias_values
 
-
-
 dna_sequence = Dna(id='ID1', sequence='AGCTAGCTAATGTACCATTACATCGTAGCTAGCTAGATATCCTAGCGCGCT')
-longest_orf = find_longest_orf(dna_sequence.sequence)
-print(translate(longest_orf))
-print(dna_sequence.gc_content())
-print(codon_bias(longest_orf))
+longest_orfs = find_orf(dna_sequence.sequence)
+translated_orfs = [translate(i[3]) for i in longest_orfs]
+print(translated_orfs)
