@@ -85,7 +85,7 @@ def compute_pairwise_distance(pair: Tuple[str, str]) -> Tuple[int, int, int]:
     alignment = GlobalAlignment(seq1, seq2)
     alignment.set_params(match=3, mismatch=-2, gap_opening=-3, gap_extension=-2)
     _, _, _, score = alignment.align()
-    return i, j, -score  # Negative because lower scores mean higher similarity
+    return i, j, -score
 
 def compute_pairwise_distances(sequences: List[str]) -> List[List[int]]:
     num_sequences = len(sequences)
@@ -100,13 +100,13 @@ def compute_pairwise_distances(sequences: List[str]) -> List[List[int]]:
 
     return distances
 
-def align_two_sequences(seq1: str, seq2: str) -> Tuple[str, str]:
+def align_two(seq1: str, seq2: str) -> Tuple[str, str]:
     alignment = GlobalAlignment(seq1, seq2)
     alignment.set_params(match=3, mismatch=-2, gap_opening=-3, gap_extension=-2)
     aligned_seq1, _, aligned_seq2, _ = alignment.align()
     return aligned_seq1, aligned_seq2
 
-def progressive_alignment(sequences: List[str]) -> List[str]:
+def align_progressively(sequences: List[str]) -> List[str]:
     num_sequences = len(sequences)
     aligned_sequences = sequences.copy()
     distance_matrix = compute_pairwise_distances(sequences)
@@ -122,7 +122,7 @@ def progressive_alignment(sequences: List[str]) -> List[str]:
                     closest_pair = (i, j)
 
         i, j = closest_pair
-        aligned_seq1, aligned_seq2 = align_two_sequences(aligned_sequences[i], aligned_sequences[j])
+        aligned_seq1, aligned_seq2 = align_two(aligned_sequences[i], aligned_sequences[j])
         aligned_sequences[i] = aligned_seq1
         aligned_sequences[j] = aligned_seq2
         for k in unaligned:
@@ -145,7 +145,7 @@ def progressive_alignment(sequences: List[str]) -> List[str]:
     return aligned_sequences
 
 def main(sequences: List[str]) -> None:
-    aligned_sequences = progressive_alignment(sequences)
+    aligned_sequences = align_progressively(sequences)
 
     for seq in aligned_sequences:
         print(seq)
