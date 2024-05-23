@@ -144,11 +144,43 @@ def align_progressively(sequences: List[str]) -> List[str]:
 
     return aligned_sequences
 
+def color_chunked_sequences(chunked_sequences: List[List[str]]) -> List[List[str]]:
+    colored_chunks = []
+    for chunk in chunked_sequences:
+        colored_chunk = [''] * len(chunk)
+        for chars in zip(*chunk):
+            all_same = all(char == chars[0] for char in chars)
+            if all_same and chars[0] != '-':
+                colored_chars = [f'\x1b[1;32m{char}\x1b[0m' for char in chars]  # Bold green for matches
+            elif '-' in chars:
+                colored_chars = [f'\x1b[31m{char}\x1b[0m' if char == '-' else char for char in chars]  # Red for gaps
+            else:
+                colored_chars = [f'\x1b[33m{char}\x1b[0m' for char in chars]  # Yellow for mismatches
+            for i, char in enumerate(colored_chars):
+                colored_chunk[i] += char
+        colored_chunks.append(colored_chunk)
+    
+    return colored_chunks
+
+def chunk_sequences(aligned_sequences: List[str], width=20) -> List[List[str]]:
+    max_len = max(len(seq) for seq in aligned_sequences)
+    chunked_sequences = []
+
+    for i in range(0, max_len, width):
+        chunk = [seq[i:i+width] for seq in aligned_sequences]
+        chunked_sequences.append(chunk)
+    
+    return chunked_sequences
+
 def main(sequences: List[str]) -> None:
     aligned_sequences = align_progressively(sequences)
+    chunked_sequences = chunk_sequences(aligned_sequences, width=5)
+    colored_chunked_sequences = color_chunked_sequences(chunked_sequences)
 
-    for seq in aligned_sequences:
-        print(seq)
+    for chunk in colored_chunked_sequences:
+        for line in chunk:
+            print(line)
+        print()
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
