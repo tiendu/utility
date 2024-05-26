@@ -4,11 +4,12 @@ import os
 import gzip
 from itertools import groupby, product
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict
 from concurrent.futures import ProcessPoolExecutor
 import hashlib
 from concurrent.futures import as_completed
 import numpy as np
+from collections import defaultdict
 
 @dataclass(frozen=True)
 class Seq:
@@ -23,8 +24,8 @@ FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
 
 def read_sequences(file_path: str) -> List[Seq]:
     sequences = []
-
     file_type = ''
+
     if any(ext in file_path for ext in FASTQ_EXTENSIONS):
         file_type = 'FASTQ'
     elif any(ext in file_path for ext in FASTA_EXTENSIONS):
@@ -32,7 +33,6 @@ def read_sequences(file_path: str) -> List[Seq]:
     else:
         raise ValueError(f'Unrecognized file extension for {file_path}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).')
     
-    # Determine the appropriate file opening mode based on the file extension.
     opener = gzip.open if file_path.endswith('.gz') else open
 
     if file_type == 'FASTQ':
@@ -40,7 +40,7 @@ def read_sequences(file_path: str) -> List[Seq]:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
                 header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
-                name = header_line[1:]  # remove '@' character
+                name = header_line[1:]
                 seq = sequence_line.upper()
                 qual = quality_line.upper()
                 sequences.append(Seq(name, seq, qual))
@@ -49,7 +49,7 @@ def read_sequences(file_path: str) -> List[Seq]:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
             for header in faiter:
                 headerstr = next(header).strip()
-                name = headerstr[1:]  # remove '>' character
+                name = headerstr[1:]
                 seq = ''.join(s.strip().upper() for s in next(faiter))
                 sequences.append(Seq(name, seq))
 
@@ -66,17 +66,25 @@ def deduplicate(sequences: List[Seq]) -> List[Seq]:
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)
     unique_kmer_hashes = set()
     unique_sequences = dict()
+    hash_cache = {}
 
     if sequences:
         min_length = len(sequences[-1].sequence)
 
     for current_sequence in sequences:
+        if current_sequence.sequence in hash_cache:
+            seq_hash = hash_cache[current_sequence.sequence]
+        else:
+            seq_hash = hash_sequence(current_sequence.sequence)
+            hash_cache[current_sequence.sequence] = seq_hash
+
         kmers = generate_kmers(current_sequence.sequence, min_length)
-        kmer_hashes = {hash_sequence(kmer) for kmer in kmers}
+        kmer_hashes = {hash_cache[kmer] if kmer in hash_cache else hash_cache.setdefault(kmer, hash_sequence(kmer)) for kmer in kmers}
+        
         if all(hash_value in unique_kmer_hashes for hash_value in kmer_hashes):
             continue
 
-        unique_sequences[hash_sequence(current_sequence.sequence)] = current_sequence
+        unique_sequences[seq_hash] = current_sequence
         unique_kmer_hashes.update(kmer_hashes)
 
     return list(unique_sequences.values())
@@ -136,10 +144,8 @@ def match_pair(sequence1: Seq, sequence2: Seq) -> List:
 
 def process_concurrently(sequences1: List[Seq], sequences2: List[Seq]):
     results = []
-
     max_workers = os.cpu_count()
 
-    # Use ProcessPoolExecutor to parallelize the execution
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(match_pair, sequence1, sequence2) for sequence1, sequence2 in product(sequences1, sequences2)]
         for future in as_completed(futures):
@@ -163,14 +169,11 @@ def process_concurrently(sequences1: List[Seq], sequences2: List[Seq]):
             for query_id, reference_id, location in results
         ]
 
-        # Determine the maximum width for each column
         max_widths = [max(len(header), max(len(row[i]) for row in truncated_results)) for i, header in enumerate(headers)]
 
-        # Print table headers
         print('|'.join(f'{header.ljust(max_widths[i])}' for i, header in enumerate(headers)))
         print('|'.join('-' * width for width in max_widths))
 
-        # Print table rows
         for row in truncated_results:
             print('|'.join(f'{cell.ljust(max_widths[i])}' for i, cell in enumerate(row)))
 
