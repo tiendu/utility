@@ -8,12 +8,12 @@ class Seq:
     sequence: str
     def transcribe(self):
         '''Convert DNA sequence to RNA sequence.'''
-        return self.sequence.replace('T', 'U')
+        return Seq(self.id, self.sequence.replace('T', 'U'))
     def reverse_complement(self):
         '''Calculate the reverse complement of the DNA sequence.'''
         complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'}
         rev_comp_seq = ''.join(complement.get(base, base) for base in reversed(self.sequence))
-        return rev_comp_seq
+        return Seq(self.id, rev_comp_seq)
 
 def can_pair(base1, base2):
     '''Check if two RNA bases can form a pair.'''
@@ -105,7 +105,7 @@ def main():
 
     for sequence in sequences:
         rna_sequence = sequence.transcribe()
-        structure = nussinov_half_matrix(rna_sequence)
+        structure = nussinov_half_matrix(rna_sequence.sequence)
         print(f'>{sequence.id}')
         print(rna_sequence)
         print(structure)
