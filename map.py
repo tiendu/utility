@@ -30,7 +30,7 @@ def read_sequences(file_path: str) -> List[Seq]:
         file_type = 'FASTA'
     else:
         raise ValueError(f'Unrecognized file extension for {file_path}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).')
-    
+
     # Determine the appropriate file opening mode based on the file extension.
     opener = gzip.open if file_path.endswith('.gz') else open
 
@@ -92,7 +92,7 @@ def reverse_translate(sequences: List[Seq]) -> List[Seq]:
     for sequence in sequences:
         converted = [conversion[aa] for aa in sequence.sequence]
         reverse_translated.append(Seq(id=sequence.id, sequence=''.join(converted)))
-        
+
     return reverse_translated
 
 def create_regex(sequence: str) -> str:
@@ -106,31 +106,33 @@ def create_regex(sequence: str) -> str:
     return regex_pattern
 
 def match_pair(sequence1: Seq, sequence2: Seq) -> List:
-    matches = []
-    
+    matches = set()
+
     if len(sequence1.sequence) > len(sequence2.sequence):
-        min_length = len(sequence2.sequence)
-        max_length = len(sequence1.sequence)
         query = sequence2
         reference = sequence1
     else:
-        min_length = len(sequence1.sequence)
-        max_length = len(sequence2.sequence)
         query = sequence1
         reference = sequence2
 
-    query_pattern = create_regex(query.sequence)
-    for i in range(max_length - min_length + 1):
-        sub_reference = reference.sequence[i:i + min_length]
-        if len(sub_reference) == min_length:
-            sub_reference_pattern = create_regex(sub_reference)
-            if (re.fullmatch(query_pattern, sub_reference) or
-                re.fullmatch(sub_reference_pattern, query.sequence) or
-                re.fullmatch(sub_reference, query.sequence) or
-                re.fullmatch(query.sequence, sub_reference)):
-                matches.append((query.id, reference.id, f'{i+1}..{i+min_length}'))
+    # Compile the regex patterns
+    query_pattern = re.compile(create_regex(query.sequence))
+    reference_pattern = re.compile(create_regex(reference.sequence))
 
-    return matches
+    # Find matches
+    for match in query_pattern.finditer(reference.sequence):
+        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
+
+    for match in re.finditer(re.escape(query.sequence), reference.sequence):
+        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
+
+    for match in reference_pattern.finditer(query.sequence):
+        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
+
+    for match in re.finditer(re.escape(reference.sequence), query.sequence):
+        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
+
+    return list(matches)
 
 def process_concurrently(sequences1: List[Seq], sequences2: List[Seq]):
     results = []
@@ -149,7 +151,7 @@ def process_concurrently(sequences1: List[Seq], sequences2: List[Seq]):
         if len(string) > max_length:
             return string[:max_length - 3] + '...'
         return string
-    
+
     if results:
         headers = ['Query ID', 'Reference ID', 'Location']
         truncated_results = [
@@ -190,11 +192,11 @@ def map(file1: str, file2: str, file1_type: str, file2_type: str):
 
 def main():
     if len(sys.argv) < 5:
-        print(f'Usage: python {sys.argv[0]} input1 input2 file1_type file2_type')
+        print(f'Usage: python {sys.argv[0]} <input 1> <input 2> <input 1 type> <input 2 type>')
         return
     
     file1, file2, file1_type, file2_type = sys.argv[1:5]
     map(file1, file2, file1_type, file2_type)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
