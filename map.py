@@ -108,29 +108,30 @@ def create_regex(sequence: str) -> str:
 def match_pair(sequence1: Seq, sequence2: Seq) -> List:
     matches = set()
 
+    # Determine which one will be the reference
     if len(sequence1.sequence) > len(sequence2.sequence):
+        min_length = len(sequence2.sequence)
+        max_length = len(sequence1.sequence)
         query = sequence2
         reference = sequence1
     else:
+        min_length = len(sequence1.sequence)
+        max_length = len(sequence2.sequence)
         query = sequence1
         reference = sequence2
 
     # Compile the regex patterns
     query_pattern = re.compile(create_regex(query.sequence))
-    reference_pattern = re.compile(create_regex(reference.sequence))
 
-    # Find matches
-    for match in query_pattern.finditer(reference.sequence):
-        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
-
-    for match in re.finditer(re.escape(query.sequence), reference.sequence):
-        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
-
-    for match in reference_pattern.finditer(query.sequence):
-        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
-
-    for match in re.finditer(re.escape(reference.sequence), query.sequence):
-        matches.add((query.id, reference.id, f'{match.start()+1}..{match.end()}'))
+    for i in range(max_length - min_length + 1):
+        sub_reference = reference.sequence[i:i + min_length]
+        if len(sub_reference) == min_length:
+            sub_reference_pattern = create_regex(sub_reference)
+            if (re.fullmatch(query_pattern, sub_reference) or
+                re.fullmatch(sub_reference_pattern, query.sequence) or
+                re.fullmatch(sub_reference, query.sequence) or
+                re.fullmatch(query.sequence, sub_reference)):
+                matches.append((query.id, reference.id, f'{i+1}..{i+min_length}'))
 
     return list(matches)
 
