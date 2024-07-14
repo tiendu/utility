@@ -105,8 +105,6 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
         
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
     '''Perform recursive deduplication of sequences using multiple threads.'''
-    shared_sequences = dict()
-
     while True:
         if not sequences:
             break
@@ -119,6 +117,8 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         seq_chunks = [sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
 
         deduped_seqs = []
+        shared_sequences = dict()
+
         # Process each chunk concurrently using multiple threads.
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences)
@@ -138,10 +138,8 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
             break
 
         # Otherwise, shuffle the partially deduplicated sequences and repeat the process.
-        deduped_seqs = list(shared_sequences.values())
-        random.shuffle(deduped_seqs)
-        
-        sequences = deduped_seqs
+        sequences = list(shared_sequences.values())
+        random.shuffle(sequences)
     
     return list(shared_sequences.values())
 
