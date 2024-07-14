@@ -3,18 +3,19 @@ import os
 import gzip
 import logging
 import hashlib
-import tempfile
+import random
+from collections import Counter
 from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
-from typing import List, Generator
+from typing import List
 import concurrent.futures
 
 # Constants
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
 FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna']
 LINE_LENGTH = 80
-BATCH_SIZE = 100_000  # Define an appropriate batch size
+CHUNK_SIZE = 10_000
 
 # Setup logging to display messages with INFO level and above.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -29,8 +30,8 @@ class Seq:
         '''Define a custom hash function for the dataclass.'''
         return hash((self.id, self.sequence, self.quality))
 
-def read_sequences_from_file(file_path: str, file_type: str) -> Generator[List[Seq], None, None]:
-    '''Read sequences from a file in batches and yield them as lists of Seq objects.'''
+def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
+    '''Read sequences from a file and return them as a list of Seq objects.'''
     sequences = []
 
     # Determine the appropriate file opening mode based on the file extension.
@@ -46,9 +47,6 @@ def read_sequences_from_file(file_path: str, file_type: str) -> Generator[List[S
                 seq = sequence_line.upper()
                 qual = quality_line.upper()
                 sequences.append(Seq(name, seq, qual))
-                if len(sequences) >= BATCH_SIZE:
-                    yield sequences
-                    sequences = []
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             # Group lines into sequences based on '>' character indicating header lines.
@@ -58,11 +56,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> Generator[List[S
                 name = headerstr[1:]  # remove '>' character
                 seq = ''.join(s.strip().upper() for s in next(faiter))
                 sequences.append(Seq(name, seq))
-                if len(sequences) >= BATCH_SIZE:
-                    yield sequences
-                    sequences = []
-    if sequences:
-        yield sequences
+    return sequences
 
 def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
     '''Write sequences to a file.'''
@@ -109,30 +103,46 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
 
     return list(uniq_seqs.values())
         
-def deduplicate_concurrently(sequence_batches: Generator[List[Seq], None, None], num_threads: int, file_type: str) -> List[Seq]:
-    '''Perform recursive deduplication of sequences using multiple threads and temporary files.'''
-    with tempfile.TemporaryDirectory() as tempdir:
-        temp_files = []
-        shared_sequences = {}
-        deduped_seqs = []
+def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
+    '''Perform recursive deduplication of sequences using multiple threads.'''
+    shared_sequences = dict()
 
+    while True:
+        if not sequences:
+            break
+
+        logging.info(f'Initial number of sequences: {len(sequences)}')
+
+        # Split sequences into chunks for parallel processing.
+        total_sequences = len(sequences)
+        chunk_size = max(1, min(CHUNK_SIZE, total_sequences // num_threads))
+        seq_chunks = [sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
+
+        deduped_seqs = []
+        # Process each chunk concurrently using multiple threads.
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences)
-            futures = [executor.submit(func, batch) for batch in sequence_batches]
+            futures = [executor.submit(func, chunk) for chunk in seq_chunks if chunk]
             concurrent.futures.wait(futures)
+
             for future in concurrent.futures.as_completed(futures):
                 deduped_seqs.extend(future.result())
 
-            temp_file_path = os.path.join(tempdir, f'temp_{len(temp_files)}.seq')
-            temp_files.append(temp_file_path)
-            write_sequences_to_file(deduped_seqs, temp_file_path)
+        # Add deduplicated sequences to the main set.
+        shared_sequences = dict()
+        for seq in deduped_seqs:
+            shared_sequences[hash_sequence(seq.sequence)] = seq
 
-        # Deduplicate across all temp files
-        for temp_file in temp_files:
-            for sequences in read_sequences_from_file(temp_file, file_type):
-                for seq in sequences:
-                    shared_sequences[hash_sequence(seq.sequence)] = seq
+        # If no sequences were deduplicated in this iteration, we're done.
+        if len(shared_sequences) == len(sequences):
+            break
 
+        # Otherwise, shuffle the partially deduplicated sequences and repeat the process.
+        deduped_seqs = list(shared_sequences.values())
+        random.shuffle(deduped_seqs)
+        
+        sequences = deduped_seqs
+    
     return list(shared_sequences.values())
 
 def main():
@@ -170,10 +180,15 @@ def main():
 
     # Read sequences from the input file.
     logging.info(f'Reading sequences from file: {args.input_file}...')
-    sequence_generator = read_sequences_from_file(args.input_file, file_type)
+    sequences = read_sequences_from_file(args.input_file, file_type)
+
+    # Re-adjust the number of threads according to the number of sequences.
+    if args.num_threads >= len(sequences) * 0.1:
+        logging.warning(f'Number of sequences too low, thread count adjusted to 1')
+        args.num_threads = 1
 
     # Perform deduplication.
-    deduplicated_sequences = deduplicate_concurrently(sequence_generator, args.num_threads, file_type)
+    deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads)
 
     # Write deduplicated sequences to the output file.
     logging.info(f'Finished. Wrote {len(deduplicated_sequences)} final deduplicated sequences to: {args.output_file}')
