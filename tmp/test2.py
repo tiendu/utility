@@ -15,7 +15,7 @@ import concurrent.futures
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
 FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna']
 LINE_LENGTH = 80
-CHUNK_SIZE = 10_000
+CHUNK_SIZE = 100_000
 
 # Setup logging to display messages with INFO level and above.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -111,27 +111,18 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
 
         logging.info(f'Initial number of sequences: {len(sequences)}')
 
-        # Split sequences into chunks for parallel processing.
         total_sequences = len(sequences)
         chunk_size = max(1, min(CHUNK_SIZE, total_sequences // num_threads))
-        seq_chunks = [sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)]
-
-        deduped_seqs = []
         shared_sequences = dict()
-
+        
         # Process each chunk concurrently using multiple threads.
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences)
-            futures = [executor.submit(func, chunk) for chunk in seq_chunks if chunk]
+            futures = [executor.submit(func, sequences[i:i + chunk_size]) for i in range(0, total_sequences, chunk_size)]
             concurrent.futures.wait(futures)
-
             for future in concurrent.futures.as_completed(futures):
-                deduped_seqs.extend(future.result())
-
-        # Add deduplicated sequences to the main set.
-        shared_sequences = dict()
-        for seq in deduped_seqs:
-            shared_sequences[hash_sequence(seq.sequence)] = seq
+                for sequence in future.result():
+                    shared_sequences[hash_sequence(sequence.sequence)] = sequence
 
         # If no sequences were deduplicated in this iteration, we're done.
         if len(shared_sequences) == len(sequences):
