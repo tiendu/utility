@@ -83,19 +83,24 @@ def generate_kmers(string: str, k: int) -> List[str]:
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
     '''Deduplicate sequences within a chunk.'''
     logging.info(f'Deduplicating a chunk with {len(sequences)} sequences...')
+    
+    # Sort sequences by length in descending order
     sequences.sort(key=lambda s: len(s.sequence), reverse=True)
+    
     uniq_kmer_hashes = set()
 
     if sequences:
         min_length = len(sequences[-1].sequence)
-    logging.info(f'Using k-mers of minimum length: {min_length}')
+        logging.info(f'Using k-mers of minimum length: {min_length}')
 
     for current_seq in sequences:
-        kmers = generate_kmers(current_seq.sequence, min_length)
-        kmer_hashes = {hash_sequence(kmer) for kmer in kmers}
-        if all(hash_val in uniq_kmer_hashes for hash_val in kmer_hashes):
+        kmer_hashes = {hash_sequence(kmer) for kmer in generate_kmers(current_seq.sequence, min_length)}
+
+        # Check if all kmer_hashes are already in uniq_kmer_hashes
+        if not kmer_hashes.isdisjoint(uniq_kmer_hashes):
             continue
 
+        # Add current sequence to unique sequences
         uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
         uniq_kmer_hashes.update(kmer_hashes)
 
