@@ -1,15 +1,14 @@
-import sys
-import re
-import os
-import gzip
-from itertools import groupby, product
+from typing import List, Dict
 from dataclasses import dataclass
-from typing import List
-from concurrent.futures import ProcessPoolExecutor
-import hashlib
-from concurrent.futures import as_completed
+import concurrent.futures
+import os
+import re
+from functools import partial
+from itertools import product, groupby
+import sys
+import gzip
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class Seq:
     id: str
     sequence: str
@@ -19,6 +18,7 @@ class Seq:
 
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
 FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
+DISPLAY_LENGTH = 20
 
 def read_sequences(file_path: str) -> List[Seq]:
     sequences = []
@@ -54,32 +54,7 @@ def read_sequences(file_path: str) -> List[Seq]:
 
     return sequences
 
-def generate_kmers(string: str, k: int) -> List[str]:
-    return [string[i:i+k] for i in range(len(string) - k + 1)]
-
-def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
-    return hash_function(sequence.encode()).hexdigest()
-
-def deduplicate(sequences: List[Seq]) -> List[Seq]:
-    sequences.sort(key=lambda s: len(s.sequence), reverse=True)
-    unique_kmer_hashes = set()
-    unique_sequences = dict()
-
-    if sequences:
-        min_length = len(sequences[-1].sequence)
-
-    for current_sequence in sequences:
-        kmers = generate_kmers(current_sequence.sequence, min_length)
-        kmer_hashes = {hash_sequence(kmer) for kmer in kmers}
-        if all(hash_value in unique_kmer_hashes for hash_value in kmer_hashes):
-            continue
-
-        unique_sequences[hash_sequence(current_sequence.sequence)] = current_sequence
-        unique_kmer_hashes.update(kmer_hashes)
-
-    return list(unique_sequences.values())
-
-def reverse_translate(sequences: List[Seq]) -> List[Seq]:
+def reverse_translate(sequence: str) -> str:
     conversion = {
         'W': 'TGG', 'Y': 'TAY', 'C': 'TGY', 'E': 'GAR',
         'K': 'AAR', 'Q': 'CAR', 'S': 'WSN', 'L': 'YTN',
@@ -88,12 +63,8 @@ def reverse_translate(sequences: List[Seq]) -> List[Seq]:
         'P': 'CCN', 'T': 'ACN', 'V': 'GTN', 'I': 'ATH',
         '*': 'TRR', 'X': 'NNN'
     }
-    reverse_translated = []
-    for sequence in sequences:
-        converted = [conversion[aa] for aa in sequence.sequence]
-        reverse_translated.append(Seq(id=sequence.id, sequence=''.join(converted)))
-
-    return reverse_translated
+    converted = [conversion[aa] for aa in sequence]
+    return ''.join(converted)
 
 def create_regex(sequence: str) -> str:
     ambiguous_nucleotide_patterns = {
@@ -105,45 +76,80 @@ def create_regex(sequence: str) -> str:
     regex_pattern = ''.join(ambiguous_nucleotide_patterns[nu] for nu in sequence)
     return regex_pattern
 
-def match_pair(sequence1: Seq, sequence2: Seq) -> List:
-    matches = set()
+def index_kmers(string: str, k: int) -> Dict[str, List[int]]:
+    '''
+    Index a string with k-mers of length k,
+    returning a dictionary where keys are k-mers and values
+    are lists of indices.
+    '''
+    kmer_dict = {}
+    for i in range(len(string) - k + 1):
+        kmer = string[i:i+k]
+        if kmer in kmer_dict:
+            kmer_dict[kmer].append(i)
+        else:
+            kmer_dict[kmer] = [i]
+    return kmer_dict
 
-    # Determine which one will be the reference
+def truncate_string(string: str, max_length: int) -> str:
+    if len(string) > max_length:
+        return string[:max_length-3] + '...'
+    return string
+
+def match_pair(sequence1: Seq, sequence2: Seq, sequence1_type: str, sequence2_type: str) -> List:
+    matches = []
+
+    if sequence1_type == 'aa':
+        sequence1.sequence = reverse_translate(sequence1.sequence)
+    elif sequence1_type == 'nu':
+        pass
+    else:
+        raise ValueError('Incorrect input 1 type!')
+
+    if sequence2_type == 'aa':
+        sequence2.sequence = reverse_translate(sequence2.sequence)
+    elif sequence2_type == 'nu':
+        pass
+    else:
+        raise ValueError('Incorrect input 2 type!')
+
     if len(sequence1.sequence) > len(sequence2.sequence):
-        min_length = len(sequence2.sequence)
-        max_length = len(sequence1.sequence)
+        k = len(sequence2.sequence)
         query = sequence2
         reference = sequence1
+        reference_type = sequence1_type
     else:
-        min_length = len(sequence1.sequence)
-        max_length = len(sequence2.sequence)
+        k = len(sequence1.sequence)
         query = sequence1
         reference = sequence2
+        reference_type = sequence2_type
 
-    # Compile the regex patterns
-    query_pattern = re.compile(create_regex(query.sequence))
+    reference_kmers = index_kmers(reference.sequence, k)
+    for kmer in reference_kmers:
+        if re.fullmatch(create_regex(kmer), query.sequence):
+            for index in reference_kmers[kmer]:
+                # print(index, kmer, query.sequence)
+                start = index + 1
+                end = index + k
+                if reference_type == 'nu':
+                    pass
+                elif reference_type == 'aa':
+                    start = int(start / 3) + 1
+                    end = int(end / 3)
+                matches.append((query.id, reference.id, f'{start}..{end}'))
 
-    for i in range(max_length - min_length + 1):
-        sub_reference = reference.sequence[i:i + min_length]
-        if len(sub_reference) == min_length:
-            sub_reference_pattern = create_regex(sub_reference)
-            if (re.fullmatch(query_pattern, sub_reference) or
-                re.fullmatch(sub_reference_pattern, query.sequence) or
-                re.fullmatch(sub_reference, query.sequence) or
-                re.fullmatch(query.sequence, sub_reference)):
-                matches.append((query.id, reference.id, f'{i+1}..{i+min_length}'))
+    return matches
 
-    return list(matches)
-
-def process_concurrently(sequences1: List[Seq], sequences2: List[Seq]):
+def process_concurrently(sequences1: List[Seq], sequences2: List[Seq], sequences1_type: str, sequences2_type: str) -> None:
     results = []
 
     max_workers = os.cpu_count()
 
     # Use ProcessPoolExecutor to parallelize the execution
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(match_pair, sequence1, sequence2) for sequence1, sequence2 in product(sequences1, sequences2)]
-        for future in as_completed(futures):
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        func = partial(match_pair, sequence1_type=sequences1_type, sequence2_type=sequences2_type)
+        futures = [executor.submit(func, sequence1, sequence2) for sequence1, sequence2 in product(sequences1, sequences2)]
+        for future in concurrent.futures.as_completed(futures):
             result = future.result()
             if result:
                 results.extend(result)
@@ -175,29 +181,15 @@ def process_concurrently(sequences1: List[Seq], sequences2: List[Seq]):
         for row in truncated_results:
             print('|'.join(f'{cell.ljust(max_widths[i])}' for i, cell in enumerate(row)))
 
-def map(file1: str, file2: str, file1_type: str, file2_type: str):
-    sequences1 = read_sequences(file1)
-    sequences2 = read_sequences(file2)
-
-    if file1_type == 'aa':
-        sequences1 = reverse_translate(deduplicate(sequences1))
-    elif file1_type == 'nu':
-        sequences1 = deduplicate(sequences1)
-    
-    if file2_type == 'aa':
-        sequences2 = reverse_translate(deduplicate(sequences2))
-    elif file2_type == 'nu':
-        sequences2 = deduplicate(sequences2)
-
-    process_concurrently(sequences1, sequences2)
-
 def main():
     if len(sys.argv) < 5:
-        print(f'Usage: python {sys.argv[0]} <input 1> <input 2> <input 1 type> <input 2 type>')
+        print(f'Usage: python {sys.argv[0]} <input_1> <input_2> <input_1_type> <input_2_type>')
         return
-    
+
     file1, file2, file1_type, file2_type = sys.argv[1:5]
-    map(file1, file2, file1_type, file2_type)
+    file1 = read_sequences(file1)
+    file2 = read_sequences(file2)
+    process_concurrently(file1, file2, file1_type, file2_type)
 
 if __name__ == '__main__':
     main()
