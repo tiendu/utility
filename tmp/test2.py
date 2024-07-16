@@ -78,19 +78,17 @@ def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
 
 def generate_kmers(string: str, k: int) -> List[str]:
     '''Split a string into k-mers of length k.'''
-    return [string[i:i+k] for i in range(len(string) - k + 1)]
+    for i in range(len(string) - k + 1):
+        yield string[i:i+k]
 
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
     '''Deduplicate sequences within a chunk.'''
     logging.info(f'Deduplicating a chunk with {len(sequences)} sequences...')
     
-    # Sort sequences by length in descending order
-    sequences.sort(key=lambda s: len(s.sequence), reverse=True)
-    
     uniq_kmer_hashes = set()
 
     if sequences:
-        min_length = len(sequences[-1].sequence)
+        min_length = min(len(seq.sequence) for seq in sequences)
         logging.info(f'Using k-mers of minimum length: {min_length}')
 
     for current_seq in sequences:
