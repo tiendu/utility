@@ -4,7 +4,6 @@ import gzip
 import logging
 import hashlib
 import random
-from collections import Counter
 from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
@@ -82,17 +81,16 @@ def generate_kmers(string: str, k: int) -> List[str]:
         yield string[i:i+k]
 
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
-    '''Deduplicate sequences within a chunk.'''
-    logging.info(f'Deduplicating a chunk with {len(sequences)} sequences...')
-    
+    '''Deduplicate sequences within a chunk.'''    
     uniq_kmer_hashes = set()
 
     if sequences:
         min_length = min(len(seq.sequence) for seq in sequences)
-        logging.info(f'Using k-mers of minimum length: {min_length}')
 
     for current_seq in sequences:
-        kmer_hashes = {hash_sequence(kmer) for kmer in generate_kmers(current_seq.sequence, min_length)}
+        kmer_hashes = set()
+        for kmer in generate_kmers(current_seq.sequence, min_length):
+            kmer_hashes.add(hash_sequence(kmer))
 
         # Check if all kmer_hashes are already in uniq_kmer_hashes
         if not kmer_hashes.isdisjoint(uniq_kmer_hashes):
@@ -101,9 +99,7 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
         # Add current sequence to unique sequences
         uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
         uniq_kmer_hashes.update(kmer_hashes)
-
-    logging.info(f'Chunk deduplication complete. Unique sequences: {len(uniq_seqs)}')
-
+    
     return list(uniq_seqs.values())
         
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
@@ -112,7 +108,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         if not sequences:
             break
 
-        logging.info(f'Initial number of sequences: {len(sequences)}')
+        logging.info(f'Number of sequences: {len(sequences)}')
 
         total_sequences = len(sequences)
         chunk_size = max(1, min(CHUNK_SIZE, total_sequences // num_threads))
@@ -171,7 +167,6 @@ def main():
         args.num_threads = min(max(args.num_threads, 1), max_threads)
 
     # Read sequences from the input file.
-    logging.info(f'Reading sequences from file: {args.input_file}...')
     sequences = read_sequences_from_file(args.input_file, file_type)
 
     # Re-adjust the number of threads according to the number of sequences.
@@ -183,7 +178,6 @@ def main():
     deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads)
 
     # Write deduplicated sequences to the output file.
-    logging.info(f'Finished. Wrote {len(deduplicated_sequences)} final deduplicated sequences to: {args.output_file}')
     write_sequences_to_file(deduplicated_sequences, args.output_file)
 
 if __name__ == '__main__':
