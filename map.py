@@ -154,11 +154,6 @@ def process_concurrently(sequences1: List[Seq], sequences2: List[Seq], sequences
             if result:
                 results.extend(result)
 
-    def truncate_string(string: str, max_length: int) -> str:
-        if len(string) > max_length:
-            return string[:max_length - 3] + '...'
-        return string
-
     if results:
         headers = ['Query ID', 'Reference ID', 'Location']
         truncated_results = [
