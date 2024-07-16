@@ -7,7 +7,7 @@ import random
 from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
-from typing import List
+from typing import List, Generator
 import concurrent.futures
 
 # Constants
@@ -75,17 +75,13 @@ def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     '''Return the hash of a sequence using the specified hash function.'''
     return hash_function(sequence.encode()).hexdigest()
 
-def generate_kmers(string: str, k: int) -> List[str]:
+def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
     '''Split a string into k-mers of length k.'''
     for i in range(len(string) - k + 1):
         yield string[i:i+k]
 
-def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
-    '''Deduplicate sequences within a chunk.'''    
-    uniq_kmer_hashes = set()
-
-    if sequences:
-        min_length = min(len(seq.sequence) for seq in sequences)
+def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: set, min_length: int) -> List[Seq]:
+    '''Deduplicate sequences within a chunk.'''
 
     for current_seq in sequences:
         kmer_hashes = set()
@@ -109,14 +105,16 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
             break
 
         logging.info(f'Number of sequences: {len(sequences)}')
-
+        
+        min_length = min(len(seq.sequence) for seq in sequences)
         total_sequences = len(sequences)
         chunk_size = max(1, min(CHUNK_SIZE, total_sequences // num_threads))
         shared_sequences = dict()
+        shared_kmer_hashes = set()
         
         # Process each chunk concurrently using multiple threads.
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences)
+            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmer_hashes=shared_kmer_hashes, min_length=min_length)
             futures = [executor.submit(func, sequences[i:i + chunk_size]) for i in range(0, total_sequences, chunk_size)]
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
