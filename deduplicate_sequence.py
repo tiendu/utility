@@ -4,10 +4,11 @@ import gzip
 import logging
 import hashlib
 import random
+import bz2
 from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
-from typing import List, Generator
+from typing import List, Generator, Union
 import concurrent.futures
 
 # Constants
@@ -23,11 +24,19 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 @dataclass(frozen=True)
 class Seq:
     id: str
-    sequence: str
+    sequence: Union[str, bytes]
     quality: str = ''
+
     def __hash__(self):
         '''Define a custom hash function for the dataclass.'''
-        return hash((self.id, self.sequence, self.quality))
+        if isinstance(self.sequence, bytes):
+            sequence = bz2.decompress(self.sequence).decode()
+        else:
+            sequence = self.sequence
+        return hash((self.id, sequence, self.quality))
+
+    def length(self):
+        return len(self.sequence)
 
 def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
     '''Read sequences from a file and return them as a list of Seq objects.'''
@@ -60,7 +69,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
 def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
     '''Write sequences to a file.'''
     opener = gzip.open if file_path.endswith('.gz') else open
-    
+
     with opener(file_path, 'wt') as f:
         for seq in sequences:
             if seq.quality == '':
@@ -71,21 +80,27 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
             else:
                 f.write(f'@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n')
 
-def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
-    '''Return the hash of a sequence using the specified hash function.'''
-    return hash_function(sequence.encode()).hexdigest()
-
 def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
     '''Split a string into k-mers of length k.'''
     for i in range(len(string) - k + 1):
         yield string[i:i+k]
 
+def hash_sequence(sequence: Union[str, bytes], hash_function=hashlib.sha3_256) -> str:
+    '''Return the hash of a sequence using the specified hash function.'''
+    if isinstance(sequence, bytes):
+        sequence = bz2.decompress(sequence).decode()
+    return hash_function(sequence.encode()).hexdigest()
+
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: set, min_length: int) -> List[Seq]:
     '''Deduplicate sequences within a chunk.'''
 
     for current_seq in sequences:
+        sequence = current_seq.sequence
+        if isinstance(sequence, bytes):
+            sequence = bz2.decompress(sequence).decode()
+
         kmer_hashes = set()
-        for kmer in generate_kmers(current_seq.sequence, min_length):
+        for kmer in generate_kmers(sequence, min_length):
             kmer_hashes.add(hash_sequence(kmer))
 
         # Check if all kmer_hashes are already in uniq_kmer_hashes
@@ -93,11 +108,11 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: s
             continue
 
         # Add current sequence to unique sequences
-        uniq_seqs[hash_sequence(current_seq.sequence)] = current_seq
+        uniq_seqs[hash_sequence(sequence)] = current_seq
         uniq_kmer_hashes.update(kmer_hashes)
-    
+
     return list(uniq_seqs.values())
-        
+
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
     '''Perform recursive deduplication of sequences using multiple threads.'''
     while True:
@@ -105,13 +120,13 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
             break
 
         logging.info(f'Number of sequences: {len(sequences)}')
-        
-        min_length = min(len(seq.sequence) for seq in sequences)
+
+        min_length = min(seq.length() for seq in sequences)
         total_sequences = len(sequences)
         chunk_size = max(1, min(CHUNK_SIZE, total_sequences // num_threads))
         shared_sequences = dict()
         shared_kmer_hashes = set()
-        
+
         # Process each chunk concurrently using multiple threads.
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmer_hashes=shared_kmer_hashes, min_length=min_length)
@@ -128,8 +143,8 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         # Otherwise, shuffle the partially deduplicated sequences and repeat the process.
         sequences = list(shared_sequences.values())
         random.shuffle(sequences)
-    
-    return list(shared_sequences.values())
+
+    return [Seq(id=seq.id, sequence=seq.sequence, quality=seq.quality) for seq in list(shared_sequences.values())]
 
 def main():
     '''Main function that handles command-line arguments and invokes the deduplication.'''
