@@ -3,17 +3,23 @@ from itertools import groupby
 import sys
 import re
 import numpy as np
+import concurrent.futures
 
 '''
 Nussinov algorithm is a fundamental tool in computational biology used
  to predict RNA secondary structures by identifying base-pairing inter-
-actions within RNA sequences. 
-The algorithm detects regions of high structural stability or folding 
-propensity in RNA molecules. 
+actions within RNA sequences.
+The algorithm detects regions of high structural stability or folding
+propensity in RNA molecules.
 This script implements the Nussinov algorithm to predict RNA secondary
  structures from input RNA sequences, providing insights into potentia-
 l functional regions within the RNA construct.
 '''
+
+CHUNK_SIZE = 200
+THRESHOLD = 6  # Minimum length threshold for consecutive pairs
+MIN_STEM_LENGTH = 12  # Minimum length for a stem
+MIN_LOOP_LENGTH = 0  # Minimum length for a loop
 
 @dataclass(frozen=True)
 class Seq:
@@ -39,6 +45,8 @@ class Seq:
             return match.start(), match.end()
         else:
             return -1, -1
+    def length(self):
+        return len(self.sequence)
 
 def can_pair(base1, base2):
     '''Check if two bases can form a pair.'''
@@ -107,7 +115,6 @@ def sum_consecutive_pairs(structure):
     total_sum = 0
     current_length = 0
     stack = []
-    threshold = 6  # Minimum length threshold for consecutive pairs
 
     for char in structure:
         if char == '(':
@@ -116,12 +123,12 @@ def sum_consecutive_pairs(structure):
             stack.pop()
             current_length += 1
         else:
-            if current_length > threshold:
+            if current_length > THRESHOLD:
                 total_sum += current_length
             current_length = 0
 
     # Check if last consecutive pairs were longer than threshold
-    if current_length > threshold:
+    if current_length > THRESHOLD:
         total_sum += current_length
 
     return total_sum
@@ -143,8 +150,6 @@ def is_stem_loop(structure):
     in_stem = False
     stem_length = 0
     loop_length = 0
-    min_stem_length = 12  # Minimum length for a stem
-    min_loop_length = 0  # Minimum length for a loop
 
     for char in structure:
         if char == '(':
@@ -155,7 +160,7 @@ def is_stem_loop(structure):
                 stem_length += 1
         elif char == '.':
             if in_stem:
-                if stem_length >= min_stem_length and loop_length >= min_loop_length:
+                if stem_length >= MIN_STEM_LENGTH and loop_length >= MIN_LOOP_LENGTH:
                     return True
                 in_stem = False
                 stem_length = 0
@@ -166,12 +171,32 @@ def is_stem_loop(structure):
             in_stem = False
             stem_length = 0
             loop_length = 0
-    
+
     # Check at the end of the structure
-    if in_stem and stem_length >= min_stem_length and loop_length >= min_loop_length:
+    if in_stem and stem_length >= MIN_STEM_LENGTH and loop_length >= MIN_LOOP_LENGTH:
         return True
 
     return False
+
+def process_subsequence(sequence, start, end):
+    '''Process a subsequence and return the results.'''
+    subsequence = sequence.extract_subsequence(start, end)
+    forward_transcript = subsequence.transcribe()
+    forward_structure = nussinov_half_matrix(forward_transcript.sequence)
+    forward_max_pairs = sum_consecutive_pairs(forward_structure)
+
+    reverse_transcript = subsequence.reverse_complement().transcribe()
+    reverse_structure = nussinov_half_matrix(reverse_transcript.sequence)
+    reverse_max_pairs = sum_consecutive_pairs(reverse_structure)
+
+    results = []
+
+    if is_stem_loop(forward_structure):
+        results.append((sequence.id, 'FW', start + 1, end, forward_structure, forward_max_pairs / forward_transcript.length()))
+    if is_stem_loop(reverse_structure):
+        results.append((sequence.id, 'RV', start + 1, end, reverse_structure, reverse_max_pairs / reverse_transcript.length()))
+
+    return results
 
 def main():
     '''Main function to process FASTA file and predict RNA structure.'''
@@ -181,29 +206,22 @@ def main():
 
     fasta_file = sys.argv[1]
     sequences = read_fasta(fasta_file)
-    chunk_size = 200
 
-    for sequence in sequences:
-        for i in range(0, len(sequence.sequence), chunk_size):
-            subsequence = sequence.extract_subsequence(i, chunk_size+i)
-            
-            forward_transcript = subsequence.transcribe().sequence
-            forward_structure = nussinov_half_matrix(forward_transcript)
-            forward_max_pairs = sum_consecutive_pairs(forward_structure)
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        futures = []
+        for sequence in sequences:
+            for i in range(0, len(sequence.sequence), CHUNK_SIZE):
+                for j in range(100, CHUNK_SIZE):
+                    end = i + j
+                    if end <= len(sequence.sequence):
+                        futures.append(executor.submit(process_subsequence, sequence, i, end))
 
-            reverse_transcript = subsequence.reverse_complement().transcribe().sequence
-            reverse_structure = nussinov_half_matrix(reverse_transcript)
-            reverse_max_pairs = sum_consecutive_pairs(reverse_structure)
-
-            if is_stem_loop(forward_structure):
-                print(f'{sequence.id}\tFW\t{i+1}..{chunk_size+i+1}')
-                print(f'Forward structure: {forward_structure}')
-                print(f'Forward max pairs: {forward_max_pairs}')
-                print(f'{"#" * 20}')
-            elif is_stem_loop(reverse_structure):
-                print(f'{sequence.id}\tRV\t{i+1}..{chunk_size+i+1}')
-                print(f'Reverse structure: {reverse_structure}')
-                print(f'Reverse max pairs: {reverse_max_pairs}')
+        for future in concurrent.futures.as_completed(futures):
+            for result in future.result():
+                seq_id, direction, start, end, structure, max_pairs = result
+                print(f'{seq_id}\t{direction}\t{start}..{end}')
+                print(f'Structure: {structure}')
+                print(f'Max pairs: {max_pairs:.3f}')
                 print(f'{"#" * 20}')
 
 if __name__ == '__main__':
