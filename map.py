@@ -73,8 +73,13 @@ def create_regex(sequence: str) -> str:
         'K': '[GT]', 'M': '[AC]', 'B': '[CGT]', 'D': '[AGT]',
         'H': '[ACT]', 'V': '[ACG]', 'N': '[ACGT]'
     }
-    regex_pattern = ''.join(ambiguous_nucleotide_patterns[nu] for nu in sequence)
-    return regex_pattern
+    regex_pattern = []
+    try:
+        for nu in sequence:
+            regex_pattern.append(ambiguous_nucleotide_patterns[nu])
+    except KeyError as e:
+        raise ValueError(f"Invalid nucleotide '{e.args[0]}' in sequence. Valid nucleotides: {list(ambiguous_nucleotide_patterns.keys())}") from e
+    return ''.join(regex_pattern)
 
 def index_kmers(string: str, k: int) -> Dict[str, List[int]]:
     '''
