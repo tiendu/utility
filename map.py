@@ -1,41 +1,53 @@
-from typing import List, Dict
-from dataclasses import dataclass
-import concurrent.futures
+import argparse
 import os
-import re
-from functools import partial
-from itertools import product, groupby
-import sys
 import gzip
+import logging
+import hashlib
+import random
+import bz2
+from functools import partial
+from itertools import groupby
+from dataclasses import dataclass
+from typing import List, Generator, Union
+import concurrent.futures
 
-@dataclass(frozen=False)
+# Constants
+FASTQ_EXTENSIONS = ['.fastq', '.fq']
+FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna']
+LINE_LENGTH = 80
+CHUNK_SIZE = 100_000
+
+# Setup logging to display messages with INFO level and above.
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Data class to represent a sequence.
+@dataclass(frozen=True)
 class Seq:
     id: str
-    sequence: str
+    sequence: Union[str, bytes]
     quality: str = ''
+
     def __hash__(self):
-        return hash((self.id, self.sequence, self.quality))
+        '''Define a custom hash function for the dataclass.'''
+        if isinstance(self.sequence, bytes):
+            sequence = bz2.decompress(self.sequence).decode()
+        else:
+            sequence = self.sequence
+        return hash((self.id, sequence, self.quality))
 
-FASTQ_EXTENSIONS = ['.fastq', '.fq']
-FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
-DISPLAY_LENGTH = 20
+    def length(self):
+        return len(self.sequence)
 
-def read_sequences(file_path: str) -> List[Seq]:
+def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
+    '''Read sequences from a file and return them as a list of Seq objects.'''
     sequences = []
-
-    file_type = ''
-    if any(ext in file_path for ext in FASTQ_EXTENSIONS):
-        file_type = 'FASTQ'
-    elif any(ext in file_path for ext in FASTA_EXTENSIONS):
-        file_type = 'FASTA'
-    else:
-        raise ValueError(f'Unrecognized file extension for {file_path}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).')
 
     # Determine the appropriate file opening mode based on the file extension.
     opener = gzip.open if file_path.endswith('.gz') else open
 
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
+            # Group lines into sets of 4 (header, sequence, '+', quality).
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
                 header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
@@ -45,151 +57,141 @@ def read_sequences(file_path: str) -> List[Seq]:
                 sequences.append(Seq(name, seq, qual))
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
+            # Group lines into sequences based on '>' character indicating header lines.
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
             for header in faiter:
                 headerstr = next(header).strip()
                 name = headerstr[1:]  # remove '>' character
                 seq = ''.join(s.strip().upper() for s in next(faiter))
                 sequences.append(Seq(name, seq))
-
     return sequences
 
-def reverse_translate(sequence: str) -> str:
-    conversion = {
-        'W': 'TGG', 'Y': 'TAY', 'C': 'TGY', 'E': 'GAR',
-        'K': 'AAR', 'Q': 'CAR', 'S': 'WSN', 'L': 'YTN',
-        'R': 'MGN', 'G': 'GGN', 'F': 'TTY', 'D': 'GAY',
-        'H': 'CAY', 'N': 'AAY', 'M': 'ATG', 'A': 'GCN',
-        'P': 'CCN', 'T': 'ACN', 'V': 'GTN', 'I': 'ATH',
-        '*': 'TRR', 'X': 'NNN'
-    }
-    converted = [conversion[aa] for aa in sequence]
-    return ''.join(converted)
+def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
+    '''Write sequences to a file.'''
+    opener = gzip.open if file_path.endswith('.gz') else open
 
-def create_regex(sequence: str) -> str:
-    ambiguous_nucleotide_patterns = {
-        'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T',
-        'R': '[AG]', 'Y': '[CT]', 'S': '[GC]', 'W': '[AT]',
-        'K': '[GT]', 'M': '[AC]', 'B': '[CGT]', 'D': '[AGT]',
-        'H': '[ACT]', 'V': '[ACG]', 'N': '[ACGT]'
-    }
-    regex_pattern = []
-    try:
-        for nu in sequence:
-            regex_pattern.append(ambiguous_nucleotide_patterns[nu])
-    except KeyError as e:
-        raise ValueError(f"Invalid nucleotide '{e.args[0]}' in sequence. Valid nucleotides: {list(ambiguous_nucleotide_patterns.keys())}") from e
-    return ''.join(regex_pattern)
+    with opener(file_path, 'wt') as f:
+        for seq in sequences:
+            if seq.quality == '':
+                f.write(f'>{seq.id}\n')
+                # Write sequence with a defined line length
+                for i in range(0, len(seq.sequence), LINE_LENGTH):
+                    f.write(seq.sequence[i:i+LINE_LENGTH] + '\n')
+            else:
+                f.write(f'@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n')
 
-def index_kmers(string: str, k: int) -> Dict[str, List[int]]:
-    '''
-    Index a string with k-mers of length k,
-    returning a dictionary where keys are k-mers and values
-    are lists of indices.
-    '''
-    kmer_dict = {}
+def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
+    '''Split a string into k-mers of length k.'''
     for i in range(len(string) - k + 1):
-        kmer = string[i:i+k]
-        if kmer in kmer_dict:
-            kmer_dict[kmer].append(i)
-        else:
-            kmer_dict[kmer] = [i]
-    return kmer_dict
+        yield string[i:i+k]
 
-def truncate_string(string: str, max_length: int) -> str:
-    if len(string) > max_length:
-        return string[:max_length-3] + '...'
-    return string
+def hash_sequence(sequence: Union[str, bytes], hash_function=hashlib.sha3_256) -> str:
+    '''Return the hash of a sequence using the specified hash function.'''
+    if isinstance(sequence, bytes):
+        sequence = bz2.decompress(sequence).decode()
+    return hash_function(sequence.encode()).hexdigest()
 
-def match_pair(sequence1: Seq, sequence2: Seq, sequence1_type: str, sequence2_type: str) -> List:
-    matches = []
+def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: set, min_length: int) -> List[Seq]:
+    '''Deduplicate sequences within a chunk.'''
 
-    if sequence1_type == 'aa':
-        sequence1.sequence = reverse_translate(sequence1.sequence)
-    elif sequence1_type == 'nu':
-        pass
-    else:
-        raise ValueError('Incorrect input 1 type!')
+    for current_seq in sequences:
+        sequence = current_seq.sequence
+        if isinstance(sequence, bytes):
+            sequence = bz2.decompress(sequence).decode()
 
-    if sequence2_type == 'aa':
-        sequence2.sequence = reverse_translate(sequence2.sequence)
-    elif sequence2_type == 'nu':
-        pass
-    else:
-        raise ValueError('Incorrect input 2 type!')
+        kmer_hashes = set()
+        for kmer in generate_kmers(sequence, min_length):
+            kmer_hashes.add(hash_sequence(kmer))
 
-    if len(sequence1.sequence) > len(sequence2.sequence):
-        k = len(sequence2.sequence)
-        query = sequence2
-        reference = sequence1
-        reference_type = sequence1_type
-    else:
-        k = len(sequence1.sequence)
-        query = sequence1
-        reference = sequence2
-        reference_type = sequence2_type
+        # Check if all kmer_hashes are already in uniq_kmer_hashes
+        if not kmer_hashes.isdisjoint(uniq_kmer_hashes):
+            continue
 
-    reference_kmers = index_kmers(reference.sequence, k)
-    for kmer in reference_kmers:
-        if re.fullmatch(create_regex(kmer), query.sequence):
-            for index in reference_kmers[kmer]:
-                # print(index, kmer, query.sequence)
-                start = index + 1
-                end = index + k
-                if reference_type == 'nu':
-                    pass
-                elif reference_type == 'aa':
-                    start = int(start / 3) + 1
-                    end = int(end / 3)
-                matches.append((query.id, reference.id, f'{start}..{end}'))
+        # Add current sequence to unique sequences
+        uniq_seqs[hash_sequence(sequence)] = current_seq
+        uniq_kmer_hashes.update(kmer_hashes)
 
-    return matches
+    return list(uniq_seqs.values())
 
-def process_concurrently(sequences1: List[Seq], sequences2: List[Seq], sequences1_type: str, sequences2_type: str) -> None:
-    results = []
+def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
+    '''Perform recursive deduplication of sequences using multiple threads.'''
+    while True:
+        if not sequences:
+            break
 
-    max_workers = os.cpu_count()
+        logging.info(f'Number of sequences: {len(sequences)}')
 
-    # Use ProcessPoolExecutor to parallelize the execution
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-        func = partial(match_pair, sequence1_type=sequences1_type, sequence2_type=sequences2_type)
-        futures = [executor.submit(func, sequence1, sequence2) for sequence1, sequence2 in product(sequences1, sequences2)]
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            if result:
-                results.extend(result)
+        min_length = min(seq.length() for seq in sequences)
+        total_sequences = len(sequences)
+        chunk_size = max(1, min(CHUNK_SIZE, total_sequences // num_threads))
+        shared_sequences = dict()
+        shared_kmer_hashes = set()
 
-    if results:
-        headers = ['Query ID', 'Reference ID', 'Location']
-        truncated_results = [
-            (
-                truncate_string(query_id, 20),
-                truncate_string(reference_id, 50),
-                location
-            )
-            for query_id, reference_id, location in results
-        ]
+        # Process each chunk concurrently using multiple threads.
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
+            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmer_hashes=shared_kmer_hashes, min_length=min_length)
+            futures = [executor.submit(func, sequences[i:i + chunk_size]) for i in range(0, total_sequences, chunk_size)]
+            concurrent.futures.wait(futures)
+            for future in concurrent.futures.as_completed(futures):
+                for sequence in future.result():
+                    shared_sequences[hash_sequence(sequence.sequence)] = sequence
 
-        # Determine the maximum width for each column
-        max_widths = [max(len(header), max(len(row[i]) for row in truncated_results)) for i, header in enumerate(headers)]
+        # If no sequences were deduplicated in this iteration, we're done.
+        if len(shared_sequences) == len(sequences):
+            break
 
-        # Print table headers
-        print('|'.join(f'{header.ljust(max_widths[i])}' for i, header in enumerate(headers)))
-        print('|'.join('-' * width for width in max_widths))
+        # Otherwise, shuffle the partially deduplicated sequences and repeat the process.
+        sequences = list(shared_sequences.values())
+        random.shuffle(sequences)
 
-        # Print table rows
-        for row in truncated_results:
-            print('|'.join(f'{cell.ljust(max_widths[i])}' for i, cell in enumerate(row)))
+    return [Seq(id=seq.id, sequence=seq.sequence, quality=seq.quality) for seq in list(shared_sequences.values())]
 
 def main():
-    if len(sys.argv) < 5:
-        print(f'Usage: python {sys.argv[0]} <input_1> <input_2> <input_1_type> <input_2_type>')
-        return
+    '''Main function that handles command-line arguments and invokes the deduplication.'''
+    parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
+    parser.add_argument('-i', '--input_file', required=True, help='Path to the input file.')
+    parser.add_argument('-o', '--output_file', required=True, help='Path to the output file.')
+    parser.add_argument('-t', '--num_threads', type=int, default=4, help='Number of threads to use. Default is 4.')
 
-    file1, file2, file1_type, file2_type = sys.argv[1:5]
-    file1 = read_sequences(file1)
-    file2 = read_sequences(file2)
-    process_concurrently(file1, file2, file1_type, file2_type)
+    args = parser.parse_args()
+
+    # Validate input and output file paths.
+    if not os.path.exists(args.input_file):
+        raise ValueError(f'The input file "{args.input_file}" does not exist.')
+    try:
+        with open(args.output_file, 'w'):
+            pass
+    except Exception as e:
+        raise ValueError(f'Error creating output file "{args.output_file}": {e}')
+
+    # Check the file type.
+    file_type = ''
+    if any(ext in args.input_file for ext in FASTQ_EXTENSIONS):
+        file_type = 'FASTQ'
+    elif any(ext in args.input_file for ext in FASTA_EXTENSIONS):
+        file_type = 'FASTA'
+    else:
+        raise ValueError(f'Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).')
+
+    # Validate the number of threads.
+    max_threads = os.cpu_count()
+    if args.num_threads < 1 or args.num_threads > max_threads:
+        logging.warning(f'Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}')
+        args.num_threads = min(max(args.num_threads, 1), max_threads)
+
+    # Read sequences from the input file.
+    sequences = read_sequences_from_file(args.input_file, file_type)
+
+    # Re-adjust the number of threads according to the number of sequences.
+    if args.num_threads >= len(sequences) * 0.1:
+        logging.warning(f'Number of sequences too low, thread count adjusted to 1')
+        args.num_threads = 1
+
+    # Perform deduplication.
+    deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads)
+
+    # Write deduplicated sequences to the output file.
+    write_sequences_to_file(deduplicated_sequences, args.output_file)
 
 if __name__ == '__main__':
     main()
