@@ -102,12 +102,16 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: s
         for kmer in generate_kmers(sequence, min_length):
             kmer_hashes.add(hash_sequence(kmer))
 
-        # Check if all kmer_hashes are already in uniq_kmer_hashes
+        # Check if any kmer_hashes are already in uniq_kmer_hashes
         if not kmer_hashes.isdisjoint(uniq_kmer_hashes):
             continue
 
         # Add current sequence to unique sequences
-        uniq_seqs[hash_sequence(sequence)] = current_seq
+        uniq_seqs[hash_sequence(sequence)] = Seq(
+            id=current_seq.id,
+            sequence=bz2.compress(sequence.encode()),
+            quality=current_seq.quality
+        )
         uniq_kmer_hashes.update(kmer_hashes)
 
     return list(uniq_seqs.values())
@@ -130,11 +134,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
                 for sequence in future.result():
-                    shared_sequences[hash_sequence(sequence.sequence)] = Seq(
-                        id=sequence.id,
-                        sequence=bz2.compress(sequence.sequence.encode()),
-                        quality=sequence.quality
-                    )
+                    shared_sequences[hash_sequence(sequence.sequence)] = sequence
 
         # If no sequences were deduplicated in this iteration, we're done.
         if len(shared_sequences) == len(sequences):
@@ -143,7 +143,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         # Otherwise, shuffle the partially deduplicated sequences and repeat the process.
         sequences = list(shared_sequences.values())
         random.shuffle(sequences)
-    
+
     logging.info(f'Final number of sequences: {len(sequences)}')
     return [Seq(id=sequence.id, sequence=bz2.decompress(sequence.sequence).decode(), quality=sequence.quality) for sequence in sequences]
 
