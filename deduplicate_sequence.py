@@ -74,6 +74,7 @@ def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
 
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, min_length: int) -> List[Seq]:
     uniq_kmers = set()
+    min_length = min(sequence.length() for sequence in sequences)
 
     for sequence in sequences:
         kmer_hashes = set(hash_sequence(kmer) for kmer in generate_kmers(sequence.sequence, min_length))
@@ -91,7 +92,6 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         logging.info(f'Current number of sequences: {len(sequences)}')
         shared_sequences = dict()
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
-        min_length = min(sequence.length() for sequence in sequences)
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, min_length=min_length)
