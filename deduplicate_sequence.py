@@ -72,10 +72,7 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
 def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(sequence.encode()).hexdigest()
 
-def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, min_length: int) -> List[Seq]:
-    uniq_kmers = set()
-    min_length = min(sequence.length() for sequence in sequences)
-
+def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set, min_length: int) -> List[Seq]:
     for sequence in sequences:
         kmer_hashes = set(hash_sequence(kmer) for kmer in generate_kmers(sequence.sequence, min_length))
         if all(kmer_hash in uniq_kmers for kmer_hash in kmer_hashes):
@@ -91,10 +88,12 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
     while sequences:
         logging.info(f'Current number of sequences: {len(sequences)}')
         shared_sequences = dict()
+        shared_kmers = set()
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
+        min_length = sequences[-1].length()
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, min_length=min_length)
+            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers, min_length=min_length)
             futures = [executor.submit(func, sequences[i:i + chunk_size]) for i in range(0, len(sequences), chunk_size)]
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
