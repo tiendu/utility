@@ -4,7 +4,6 @@ import gzip
 import logging
 import hashlib
 import random
-import bz2
 from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
@@ -30,7 +29,7 @@ class Seq:
     def __hash__(self):
         '''Define a custom hash function for the dataclass.'''
         if isinstance(self.sequence, bytes):
-            sequence = bz2.decompress(self.sequence).decode()
+            sequence = gzip.decompress(self.sequence).decode()
         else:
             sequence = self.sequence
         return hash((self.id, sequence, self.quality))
@@ -88,7 +87,7 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
 def hash_sequence(sequence: Union[str, bytes], hash_function=hashlib.sha3_256) -> str:
     '''Return the hash of a sequence using the specified hash function.'''
     if isinstance(sequence, bytes):
-        sequence = bz2.decompress(sequence).decode()
+        sequence = gzip.decompress(sequence).decode()
     return hash_function(sequence.encode()).hexdigest()
 
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: set, min_length: int) -> List[Seq]:
@@ -96,20 +95,20 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: s
     for current_seq in sequences:
         sequence = current_seq.sequence
         if isinstance(sequence, bytes):
-            sequence = bz2.decompress(sequence).decode()
+            sequence = gzip.decompress(sequence).decode()
 
         kmer_hashes = set()
         for kmer in generate_kmers(sequence, min_length):
             kmer_hashes.add(hash_sequence(kmer))
 
         # Check if any kmer_hashes are already in uniq_kmer_hashes
-        if not kmer_hashes.isdisjoint(uniq_kmer_hashes):
+        if all(kmer_hash in uniq_kmers for kmer_hash in kmer_hashes):
             continue
 
         # Add current sequence to unique sequences
         uniq_seqs[hash_sequence(sequence)] = Seq(
             id=current_seq.id,
-            sequence=bz2.compress(sequence.encode()),
+            sequence=gzip.compress(sequence.encode()),
             quality=current_seq.quality
         )
         uniq_kmer_hashes.update(kmer_hashes)
@@ -145,7 +144,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         random.shuffle(sequences)
 
     logging.info(f'Final number of sequences: {len(sequences)}')
-    return [Seq(id=sequence.id, sequence=bz2.decompress(sequence.sequence).decode(), quality=sequence.quality) for sequence in sequences]
+    return [Seq(id=sequence.id, sequence=gzip.decompress(sequence.sequence).decode(), quality=sequence.quality) for sequence in sequences]
 
 def main():
     '''Main function that handles command-line arguments and invokes the deduplication.'''
