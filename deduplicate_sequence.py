@@ -7,7 +7,7 @@ import random
 from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
-from typing import List, Generator, Union
+from typing import List, Generator
 import concurrent.futures
 
 # Constants
@@ -72,9 +72,8 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
 def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(sequence.encode()).hexdigest()
 
-def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
+def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, min_length: int) -> List[Seq]:
     uniq_kmers = set()
-    min_length = min(sequence.length() for sequence in sequences)
 
     for sequence in sequences:
         kmer_hashes = set(hash_sequence(kmer) for kmer in generate_kmers(sequence.sequence, min_length))
@@ -86,15 +85,17 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict) -> List[Seq]:
     return list(uniq_seqs.values())
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
+    chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
+
     while sequences:
         logging.info(f'Current number of sequences: {len(sequences)}')
-        total_sequences = len(sequences)
-        chunk_size = max(1, min(CHUNK_SIZE, total_sequences // num_threads))
         shared_sequences = dict()
+        sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
+        min_length = min(sequence.length() for sequence in sequences)
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences)
-            futures = [executor.submit(func, sequences[i:i + chunk_size]) for i in range(0, total_sequences, chunk_size)]
+            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, min_length=min_length)
+            futures = [executor.submit(func, sequences[i:i + chunk_size]) for i in range(0, len(sequences), chunk_size)]
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
                 for sequence in future.result():
