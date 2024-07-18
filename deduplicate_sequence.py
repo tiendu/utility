@@ -93,7 +93,6 @@ def hash_sequence(sequence: Union[str, bytes], hash_function=hashlib.sha3_256) -
 
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: set, min_length: int) -> List[Seq]:
     '''Deduplicate sequences within a chunk.'''
-
     for current_seq in sequences:
         sequence = current_seq.sequence
         if isinstance(sequence, bytes):
@@ -115,11 +114,8 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmer_hashes: s
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
     '''Perform recursive deduplication of sequences using multiple threads.'''
-    while True:
-        if not sequences:
-            break
-
-        logging.info(f'Number of sequences: {len(sequences)}')
+    while sequences:
+        logging.info(f'Current number of sequences: {len(sequences)}')
 
         min_length = min(seq.length() for seq in sequences)
         total_sequences = len(sequences)
@@ -134,7 +130,11 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
                 for sequence in future.result():
-                    shared_sequences[hash_sequence(sequence.sequence)] = sequence
+                    shared_sequences[hash_sequence(sequence.sequence)] = Seq(
+                        id=sequence.id,
+                        sequence=bz2.compress(sequence.sequence.encode()),
+                        quality=sequence.quality
+                    )
 
         # If no sequences were deduplicated in this iteration, we're done.
         if len(shared_sequences) == len(sequences):
@@ -143,8 +143,9 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         # Otherwise, shuffle the partially deduplicated sequences and repeat the process.
         sequences = list(shared_sequences.values())
         random.shuffle(sequences)
-
-    return [Seq(id=seq.id, sequence=seq.sequence, quality=seq.quality) for seq in list(shared_sequences.values())]
+    
+    logging.info(f'Final number of sequences: {len(sequences)}')
+    return [Seq(id=sequence.id, sequence=bz2.decompress(sequence.sequence).decode(), quality=sequence.quality) for sequence in sequences]
 
 def main():
     '''Main function that handles command-line arguments and invokes the deduplication.'''
@@ -181,6 +182,8 @@ def main():
 
     # Read sequences from the input file.
     sequences = read_sequences_from_file(args.input_file, file_type)
+    if not sequences:
+        raise ValueError('No sequences detected!')
 
     # Re-adjust the number of threads according to the number of sequences.
     if args.num_threads >= len(sequences) * 0.1:
