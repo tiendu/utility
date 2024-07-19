@@ -91,8 +91,6 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: Dict[str, Seq], uniq_kmer
 
     uniq_seqs.update(local_uniq_seqs)
     uniq_kmers.update(local_uniq_kmers)
-    local_uniq_seqs.clear()
-    local_uniq_kmers.clear()
 
     return list(local_uniq_seqs.values())
 
@@ -107,7 +105,6 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
         divided_chunks = round_robin_divide(sequences, chunk_size, num_threads)
-        sequences.clear()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers, min_length=min_length)
