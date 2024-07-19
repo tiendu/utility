@@ -69,11 +69,10 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
     for i in range(len(string) - k + 1):
         yield string[i:i+k]
 
-def round_robin_divide(sequences: List[Seq], chunk_size: int, num_threads: int) -> Generator[List[Seq], None, None]:
+def round_robin_divide(sequences: List[Seq], chunk_size: int, num_threads: int) -> List[List[Seq]]:
     chunks = [sequences[i:i + chunk_size] for i in range(0, len(sequences), chunk_size)]
 
-    for i in range(len(chunks)):
-         yield chunks[i % num_threads]
+    return [chunks[i % num_threads] for i in range(len(chunks))]
 
 def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(sequence.encode()).hexdigest()
