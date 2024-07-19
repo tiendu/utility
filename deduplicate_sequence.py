@@ -85,6 +85,8 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set, mi
 
     uniq_seqs.update(local_uniq_seqs)
     uniq_kmers.update(local_uniq_kmers)
+    local_uniq_seqs.clear()
+    local_uniq_kmers.clear()
 
     return list(local_uniq_seqs.values())
 
