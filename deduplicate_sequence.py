@@ -25,10 +25,10 @@ class Seq:
     sequence: str
     quality: str = ''
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.id, self.sequence, self.quality))
 
-    def length(self):
+    def length(self) -> int:
         return len(self.sequence)
 
 def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
@@ -72,7 +72,7 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
 def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(sequence.encode()).hexdigest()
 
-def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set, min_length: int) -> List[Seq]:
+def deduplicate_chunk(sequences: List[Seq], uniq_seqs: Dict[str, Seq], uniq_kmers: Set[str], min_length: int) -> List[Seq]:
     local_uniq_seqs = {}
     local_uniq_kmers = set()
 
@@ -96,8 +96,8 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
     while sequences:
         total_sequences = len(sequences)
         logging.info(f'Current number of sequences: {total_sequences}')
-        shared_sequences = dict()
-        shared_kmers = set()
+        shared_sequences = dict()  # type: Dict[str, Seq]
+        shared_kmers = set()       # type: Set[str]
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
         divided_chunks = [[sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)][j::num_threads] for j in range(num_threads)]
@@ -116,10 +116,10 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         sequences = list(shared_sequences.values())
         random.shuffle(sequences)
 
-    logging.info(f'Final number of sequences: {len(list(shared_sequences.values()))}')
+    logging.info(f'Final number of sequences: {len(shared_sequences)}')
     return list(shared_sequences.values())
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
     parser.add_argument('-i', '--input_file', required=True, help='Path to the input file.')
     parser.add_argument('-o', '--output_file', required=True, help='Path to the output file.')
