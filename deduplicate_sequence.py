@@ -7,7 +7,7 @@ import random
 from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
-from typing import List, Generator
+from typing import List, Generator, Dict, Set
 import concurrent.futures
 
 # Constants
@@ -73,40 +73,49 @@ def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(sequence.encode()).hexdigest()
 
 def deduplicate_chunk(sequences: List[Seq], uniq_seqs: dict, uniq_kmers: set, min_length: int) -> List[Seq]:
+    local_uniq_seqs = {}
+    local_uniq_kmers = set()
+
     for sequence in sequences:
         kmer_hashes = set(hash_sequence(kmer) for kmer in generate_kmers(sequence.sequence, min_length))
-        if all(kmer_hash in uniq_kmers for kmer_hash in kmer_hashes):
+        if all(kmer_hash in uniq_kmers or kmer_hash in local_uniq_kmers for kmer_hash in kmer_hashes):
             continue
-        uniq_seqs[hash_sequence(sequence.sequence)] = sequence
-        uniq_kmers.update(kmer_hashes)
+        local_uniq_seqs[hash_sequence(sequence.sequence)] = sequence
+        local_uniq_kmers.update(kmer_hashes)
 
-    return list(uniq_seqs.values())
+    uniq_seqs.update(local_uniq_seqs)
+    uniq_kmers.update(local_uniq_kmers)
+
+    return list(local_uniq_seqs.values())
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
     chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
 
     while sequences:
-        logging.info(f'Current number of sequences: {len(sequences)}')
+        total_sequences = len(sequences)
+        logging.info(f'Current number of sequences: {total_sequences}')
         shared_sequences = dict()
         shared_kmers = set()
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
+        divided_chunks = [[sequences[i:i + chunk_size] for i in range(0, total_sequences, chunk_size)][j::num_threads] for j in range(num_threads)]
+        sequences.clear()
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers, min_length=min_length)
-            futures = [executor.submit(func, sequences[i:i + chunk_size]) for i in range(0, len(sequences), chunk_size)]
+            futures = [executor.submit(func, chunk) for chunks in divided_chunks for chunk in chunks]
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
                 for sequence in future.result():
                     shared_sequences[hash_sequence(sequence.sequence)] = sequence
 
-        if len(shared_sequences) == len(sequences):
+        if len(shared_sequences) == total_sequences:
             break
         sequences = list(shared_sequences.values())
         random.shuffle(sequences)
 
-    logging.info(f'Final number of sequences: {len(sequences)}')
-    return sequences
+    logging.info(f'Final number of sequences: {len(list(shared_sequences.values()))}')
+    return list(shared_sequences.values())
 
 def main():
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
