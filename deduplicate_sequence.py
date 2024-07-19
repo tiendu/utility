@@ -69,7 +69,7 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
     for i in range(len(string) - k + 1):
         yield string[i:i+k]
 
-def round_robin_divide(sequences: List[Seq], chunk_size: int, num_threads: int) -> List[List[Seq]]:
+def round_robin_divide(sequences: List[Seq], chunk_size: int, num_threads: int) -> Generator[List[Seq], None, None]:
     chunks = [sequences[i:i + chunk_size] for i in range(0, len(sequences), chunk_size)]
 
     return [chunks[i % num_threads] for i in range(len(chunks))]
@@ -104,8 +104,9 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
         divided_chunks = round_robin_divide(sequences, chunk_size, num_threads)
+        sequences.clear()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers, min_length=min_length)
             futures = [executor.submit(func, chunk) for chunks in divided_chunks for chunk in chunks]
             concurrent.futures.wait(futures)
