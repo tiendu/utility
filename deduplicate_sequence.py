@@ -72,17 +72,13 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
 def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(sequence.encode()).hexdigest()
 
-
 def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key: Callable[[Any], Any]) -> List[List[Any]]:
-    total_items = len(items)
     items = sorted(items, key=key, reverse=True)
     chunks = [[] for _ in range(num_threads)]
 
-    # Distribute items in a round-robin fashion
     for i, item in enumerate(items):
         chunks[i % num_threads].append(item)
 
-    # Further divide each chunk into smaller chunks of size `chunk_size`
     divided_chunks = []
     for chunk in chunks:
         for i in range(0, len(chunk), chunk_size):
@@ -90,7 +86,7 @@ def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key:
 
     return divided_chunks
 
-def deduplicate_chunk(sequences: List[Seq], uniq_seqs: Dict[str, Seq], uniq_kmers: Set[str], min_length: int) -> List[Seq]:
+def deduplicate_chunk(sequences: List[Seq], uniq_kmers: Set[str], min_length: int) -> List[Seq]:
     local_uniq_seqs = {}
     local_uniq_kmers = set()
 
@@ -101,9 +97,7 @@ def deduplicate_chunk(sequences: List[Seq], uniq_seqs: Dict[str, Seq], uniq_kmer
         local_uniq_seqs[hash_sequence(sequence.sequence)] = sequence
         local_uniq_kmers.update(kmer_hashes)
 
-    uniq_seqs.update(local_uniq_seqs)
     uniq_kmers.update(local_uniq_kmers)
-
     return list(local_uniq_seqs.values())
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
@@ -112,14 +106,14 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
     while sequences:
         total_sequences = len(sequences)
         logging.info(f'Current number of sequences: {total_sequences}')
-        shared_sequences: Dict[str, Seq] = dict()
+        shared_sequences: Dict[str, Seq] = {}
         shared_kmers: Set[str] = set()
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
         chunks = round_robin_divide(sequences, chunk_size, num_threads, key=lambda sequence: sequence.length())
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, uniq_seqs=shared_sequences, uniq_kmers=shared_kmers, min_length=min_length)
+            func = partial(deduplicate_chunk, uniq_kmers=shared_kmers, min_length=min_length)
             futures = [executor.submit(func, chunk) for chunk in chunks]
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
