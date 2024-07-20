@@ -106,7 +106,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
     while sequences:
         total_sequences = len(sequences)
         logging.info(f'Current number of sequences: {total_sequences}')
-        shared_sequences: Dict[str, Seq] = {}
+        shared_sequences: Dict[str, Seq] = dict()
         shared_kmers: Set[str] = set()
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
