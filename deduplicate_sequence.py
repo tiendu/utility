@@ -69,8 +69,8 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
     for i in range(len(string) - k + 1):
         yield string[i:i+k]
 
-def hash_sequence(sequence: str, hash_function=hashlib.sha3_256) -> str:
-    return hash_function(sequence.encode()).hexdigest()
+def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
+    return hash_function(string.encode()).hexdigest()
 
 def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key: Callable[[Any], Any]) -> List[List[Any]]:
     items = sorted(items, key=key, reverse=True)
@@ -91,22 +91,22 @@ def deduplicate_chunk(sequences: List[Seq], uniq_kmers: Set[str], min_length: in
     local_uniq_kmers = set()
 
     for sequence in sequences:
-        kmer_hashes = set(hash_sequence(kmer) for kmer in generate_kmers(sequence.sequence, min_length))
+        kmer_hashes = set(hash_string(kmer) for kmer in generate_kmers(sequence.sequence, min_length))
         if all(kmer_hash in uniq_kmers or kmer_hash in local_uniq_kmers for kmer_hash in kmer_hashes):
             continue
-        local_uniq_seqs[hash_sequence(sequence.sequence)] = sequence
+        local_uniq_seqs[hash_string(sequence.sequence)] = sequence
         local_uniq_kmers.update(kmer_hashes)
 
     uniq_kmers.update(local_uniq_kmers)
+
     return list(local_uniq_seqs.values())
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
     chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
 
     while sequences:
-        total_sequences = len(sequences)
-        logging.info(f'Current number of sequences: {total_sequences}')
-        shared_sequences: Dict[str, Seq] = dict()
+        logging.info(f'Current number of sequences: {len(sequences)}')
+        shared_sequences: Set[Seq] = set()
         shared_kmers: Set[str] = set()
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
@@ -117,16 +117,15 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
             futures = [executor.submit(func, chunk) for chunk in chunks]
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
-                for sequence in future.result():
-                    shared_sequences[hash_sequence(sequence.sequence)] = sequence
+                shared_sequences.update(future.result())
 
-        if len(shared_sequences) == total_sequences:
+        if len(shared_sequences) == len(sequences):
             break
-        sequences = list(shared_sequences.values())
+        sequences = list(shared_sequences)
         random.shuffle(sequences)
 
     logging.info(f'Final number of sequences: {len(shared_sequences)}')
-    return list(shared_sequences.values())
+    return list(shared_sequences)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
