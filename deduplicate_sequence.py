@@ -72,10 +72,19 @@ def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
 
-def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key: Callable[[Any], Any]) -> List[List[Any]]:
-    items = sorted(items, key=key, reverse=True)
-    chunks = [[] for _ in range(num_threads)]
+def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key: Callable[[Any], Any], is_descending: bool) -> List[List[Any]]:
+    def is_sorted(lst: List[Any], comparison_func: Callable[[Any, Any], bool]) -> bool:
+        return all(comparison_func(lst[i], lst[i + 1]) for i in range(len(lst) - 1))
 
+    if is_descending:
+        order = lambda x, y: x >= y
+    else:
+        order = lambda x, y: x <= y
+
+    if not is_sorted([key(item) for item in items], order):
+        items = sorted(items, key=key, reverse=is_descending)
+
+    chunks = [[] for _ in range(num_threads)]
     for i, item in enumerate(items):
         chunks[i % num_threads].append(item)
 
@@ -110,7 +119,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         shared_kmers: Set[str] = set()
         sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
         min_length = sequences[-1].length()
-        chunks = round_robin_divide(sequences, chunk_size, num_threads, key=lambda sequence: sequence.length())
+        chunks = round_robin_divide(sequences, chunk_size, num_threads, key=lambda sequence: sequence.length(), is_descending=True)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk, uniq_kmers=shared_kmers, min_length=min_length)
