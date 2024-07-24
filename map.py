@@ -29,7 +29,7 @@ def read_sequences(file_path: str) -> List[Seq]:
     elif any(ext in file_path for ext in FASTA_EXTENSIONS):
         file_type = 'FASTA'
     else:
-        raise ValueError(f'Unrecognized file extension for {file_path}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).')
+        raise ValueError(f'Unrecognized file extension for {file_path}. Expected FASTA {FASTA_EXTENSIONS} or FASTQ {FASTQ_EXTENSIONS}')
 
     # Determine the appropriate file opening mode based on the file extension.
     opener = gzip.open if file_path.endswith('.gz') else open
@@ -193,3 +193,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+map
