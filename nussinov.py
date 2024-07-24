@@ -25,19 +25,21 @@ MIN_LOOP_LENGTH = 0  # Minimum length for a loop
 class Seq:
     id: str
     sequence: str
+ 
     def transcribe(self):
-        '''Convert DNA sequence to RNA sequence.'''
         return Seq(self.id, self.sequence.replace('T', 'U'))
+    
     def reverse_complement(self):
-        '''Calculate the reverse complement of the DNA sequence.'''
-        complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'}
-        rev_comp_seq = ''.join(complement.get(base, base) for base in reversed(self.sequence))
-        return Seq(self.id, rev_comp_seq)
+        # IUPAC nucleotide code for ambiguous nucleotides
+        complement = str.maketrans('ATCGBDHKMNRSVWY', 'TAGCVHDMKNSBYRW')
+        return Seq(self.id, self.sequence.translate(complement)[::-1])
+     
     def extract_subsequence(self, start, end):
         '''Extract a subsequence given a start and end position.'''
         if end > len(self.sequence):
             return Seq(self.id + f' {start+1}..{len(self.sequence)}', self.sequence[start:end])
         return Seq(self.id + f' {start+1}..{end+1}', self.sequence[start:end])
+     
     def locate_subsequence(self, subsequence):
         '''Locate the start and end positions of a subsequence within the original sequence.'''
         match = re.search(subsequence, self.sequence)
@@ -45,12 +47,18 @@ class Seq:
             return match.start(), match.end()
         else:
             return -1, -1
+         
     def length(self):
         return len(self.sequence)
 
 def can_pair(base1, base2):
     '''Check if two bases can form a pair.'''
-    pairs = {'A': 'U', 'U': 'A', 'G': 'C', 'C': 'G'}
+    pairs = {
+        'A': 'U', 'U': 'A', 'G': 'C', 'C': 'G',
+        'R': 'Y', 'Y': 'R', 'S': 'S', 'W': 'W', 
+        'K': 'M', 'M': 'K', 'B': 'V', 'D': 'H', 
+        'H': 'D', 'V': 'B'
+    }
     return pairs.get(base1) == base2
 
 def nussinov_half_matrix(seq):
