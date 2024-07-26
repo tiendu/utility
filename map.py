@@ -6,6 +6,7 @@ import re
 from functools import partial
 from itertools import product, groupby
 import sys
+import csv
 import gzip
 
 @dataclass(frozen=False)
@@ -145,7 +146,7 @@ def match_pair(sequence1: Seq, sequence2: Seq, sequence1_type: str, sequence2_ty
 
     return matches
 
-def process_concurrently(sequences1: List[Seq], sequences2: List[Seq], sequences1_type: str, sequences2_type: str) -> None:
+def process_concurrently(sequences1: List[Seq], sequences2: List[Seq], sequences1_type: str, sequences2_type: str, output_file: str) -> None:
     results = []
 
     max_workers = os.cpu_count()
@@ -170,27 +171,20 @@ def process_concurrently(sequences1: List[Seq], sequences2: List[Seq], sequences
             for query_id, reference_id, location in results
         ]
 
-        # Determine the maximum width for each column
-        max_widths = [max(len(header), max(len(row[i]) for row in truncated_results)) for i, header in enumerate(headers)]
-
-        # Print table headers
-        print('|'.join(f'{header.ljust(max_widths[i])}' for i, header in enumerate(headers)))
-        print('|'.join('-' * width for width in max_widths))
-
-        # Print table rows
-        for row in truncated_results:
-            print('|'.join(f'{cell.ljust(max_widths[i])}' for i, cell in enumerate(row)))
+        with open(output_file, 'w', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(headers)
+            csv_writer.writerows(truncated_results)
 
 def main():
-    if len(sys.argv) < 5:
-        print(f'Usage: python {sys.argv[0]} <input_1> <input_2> <input_1_type> <input_2_type>')
+    if len(sys.argv) < 6:
+        print(f'Usage: python {sys.argv[0]} <input_1> <input_2> <input_1_type> <input_2_type> <output_file>')
         return
 
-    file1, file2, file1_type, file2_type = sys.argv[1:5]
+    file1, file2, file1_type, file2_type, output_file = sys.argv[1:6]
     file1 = read_sequences(file1)
     file2 = read_sequences(file2)
-    process_concurrently(file1, file2, file1_type, file2_type)
+    process_concurrently(file1, file2, file1_type, file2_type, output_file)
 
 if __name__ == '__main__':
     main()
-map
