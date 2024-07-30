@@ -123,7 +123,7 @@ def read_fasta(filename: str) -> List[Seq]:
             sequences.append(Seq(name, seq))
     return sequences
 
-def process_sequence(sequence: Seq) -> List[Tuple[str, str, str, str]]:
+def nussinov(sequence: Seq) -> List[Tuple[str, str, str, str]]:
     forward_transcript = sequence.transcribe()
     forward_structure = nussinov_half_matrix(forward_transcript.sequence)
 
@@ -148,7 +148,7 @@ def main():
     sequences = read_fasta(input_file)
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        futures = [executor.submit(process_sequence, sequence) for sequence in sequences]
+        futures = [executor.submit(nussinov, sequence) for sequence in sequences]
 
         with open(output_file, 'w') as fout:
             for future in concurrent.futures.as_completed(futures):
