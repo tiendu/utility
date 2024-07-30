@@ -139,22 +139,24 @@ def process_sequence(sequence: Seq) -> List[Tuple[str, str, str, str]]:
 
 def main():
     '''Main function to process FASTA file and predict RNA structure.'''
-    if len(sys.argv) != 2:
-        print(f'Usage: python {sys.argv[0]} <fasta_file>')
+    if len(sys.argv) != 3:
+        print(f'Usage: python {sys.argv[0]} <input_file> <output_file>')
         return
 
-    fasta_file = sys.argv[1]
-    sequences = read_fasta(fasta_file)
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+    sequences = read_fasta(input_file)
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
         futures = [executor.submit(process_sequence, sequence) for sequence in sequences]
 
-        for future in concurrent.futures.as_completed(futures):
-            for result in future.result():
-                seqid, seq, direction, structure = result
-                print(f'>{seqid}|{direction}')
-                print(seq)
-                print(structure)
+        with open(output_file, 'w') as fout:
+            for future in concurrent.futures.as_completed(futures):
+                for result in future.result():
+                    seqid, seq, direction, structure = result
+                    fout.write(f'>{seqid}|{direction}\n')
+                    fout.write(f'{seq}\n')
+                    fout.write(f'{structure}\n')
 
 if __name__ == '__main__':
     main()
