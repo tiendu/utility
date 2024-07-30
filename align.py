@@ -3,7 +3,6 @@ import sys
 from dataclasses import dataclass
 from typing import List, Tuple
 
-
 @dataclass
 class SequenceAlignment:
     sequence1: str  # First input sequence
@@ -166,6 +165,19 @@ class LocalAlignment(SequenceAlignment):
             start1 = match1.start()
             start2 = match2.start()
             return [start1 + 1, start2 + 1]
+
+def print_alignment(seq1: str, symbols: str, seq2: str, width: int=60) -> None:
+    '''Print sequences and alignment symbols in chunks with annotations.'''
+    max_len = max(len(seq1), len(seq2))
+
+    for i in range(0, max_len, width):
+        before_chunk = seq1[i:i+width] if i < len(seq1) else ''
+        after_chunk = seq2[i:i+width] if i < len(seq2) else ''
+        annotation_chunk = symbols[i:i+width] if i < len(symbols) else ''
+
+        print(f'{i+1:4d} {before_chunk}')
+        print(f'     {annotation_chunk}')
+        print(f'{i+1:4d} {after_chunk}\n')
 
 def main(sequence1: str, sequence2: str) -> None:
     # Perform global alignment
