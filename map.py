@@ -9,22 +9,19 @@ import sys
 import csv
 import gzip
 
-@dataclass(frozen=False)
+@dataclass(frozen=True)
 class Seq:
     id: str
     sequence: str
     quality: str = ''
-    def __hash__(self):
-        return hash((self.id, self.sequence, self.quality))
-
-FASTQ_EXTENSIONS = ['.fastq', '.fq']
-FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
-DISPLAY_LENGTH = 20
+    
+    def __post_init__(self):
+        object.__setattr__(self, 'sequence', self.sequence.upper())
 
 def read_sequences(file_path: str) -> List[Seq]:
     sequences = []
-
     file_type = ''
+
     if any(ext in file_path for ext in FASTQ_EXTENSIONS):
         file_type = 'FASTQ'
     elif any(ext in file_path for ext in FASTA_EXTENSIONS):
@@ -32,7 +29,6 @@ def read_sequences(file_path: str) -> List[Seq]:
     else:
         raise ValueError(f'Unrecognized file extension for {file_path}. Expected FASTA {FASTA_EXTENSIONS} or FASTQ {FASTQ_EXTENSIONS}')
 
-    # Determine the appropriate file opening mode based on the file extension.
     opener = gzip.open if file_path.endswith('.gz') else open
 
     if file_type == 'FASTQ':
@@ -40,7 +36,7 @@ def read_sequences(file_path: str) -> List[Seq]:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
                 header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
-                name = header_line[1:]  # remove '@' character
+                name = header_line[1:]
                 seq = sequence_line.upper()
                 qual = quality_line.upper()
                 sequences.append(Seq(name, seq, qual))
@@ -49,14 +45,14 @@ def read_sequences(file_path: str) -> List[Seq]:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
             for header in faiter:
                 headerstr = next(header).strip()
-                name = headerstr[1:]  # remove '>' character
+                name = headerstr[1:]
                 seq = ''.join(s.strip().upper() for s in next(faiter))
                 sequences.append(Seq(name, seq))
 
     return sequences
 
 def reverse_translate(sequence: str) -> str:
-    conversion = {
+    aa_to_nu = {
         'W': 'TGG', 'Y': 'TAY', 'C': 'TGY', 'E': 'GAR',
         'K': 'AAR', 'Q': 'CAR', 'S': 'WSN', 'L': 'YTN',
         'R': 'MGN', 'G': 'GGN', 'F': 'TTY', 'D': 'GAY',
@@ -64,84 +60,60 @@ def reverse_translate(sequence: str) -> str:
         'P': 'CCN', 'T': 'ACN', 'V': 'GTN', 'I': 'ATH',
         '*': 'TRR', 'X': 'NNN'
     }
-    converted = [conversion[aa] for aa in sequence]
-    return ''.join(converted)
+    trans_table = str.maketrans(aa_to_nu)
+    try:
+        rev_trans = sequence.translate(trans_table)
+    except KeyError as e:
+        raise ValueError(f"Invalid amino acid '{e.args[0]}' in sequence. Valid amino acids: {list(aa_to_nu.keys())}") from e
+    return rev_trans
 
 def create_regex(sequence: str) -> str:
-    ambiguous_nucleotide_patterns = {
+    ambig_nucl_patt = {
         'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T',
         'R': '[AG]', 'Y': '[CT]', 'S': '[GC]', 'W': '[AT]',
         'K': '[GT]', 'M': '[AC]', 'B': '[CGT]', 'D': '[AGT]',
         'H': '[ACT]', 'V': '[ACG]', 'N': '[ACGT]'
     }
-    regex_pattern = []
+    trans_table = str.maketrans(ambig_nucl_patt)
     try:
-        for nu in sequence:
-            regex_pattern.append(ambiguous_nucleotide_patterns[nu])
+        regex_pattern = sequence.translate(trans_table)
     except KeyError as e:
-        raise ValueError(f"Invalid nucleotide '{e.args[0]}' in sequence. Valid nucleotides: {list(ambiguous_nucleotide_patterns.keys())}") from e
-    return ''.join(regex_pattern)
+        raise ValueError(f"Invalid nucleotide '{e.args[0]}' in sequence. Valid nucleotides: {list(ambig_nucl_patt.keys())}") from e
+    return regex_pattern
 
 def index_kmers(string: str, k: int) -> Dict[str, List[int]]:
-    '''
-    Index a string with k-mers of length k,
-    returning a dictionary where keys are k-mers and values
-    are lists of indices.
-    '''
     kmer_dict = {}
     for i in range(len(string) - k + 1):
         kmer = string[i:i+k]
-        if kmer in kmer_dict:
-            kmer_dict[kmer].append(i)
-        else:
-            kmer_dict[kmer] = [i]
+        kmer_dict.setdefault(kmer, []).append(i)
     return kmer_dict
 
 def truncate_string(string: str, max_length: int) -> str:
-    if len(string) > max_length:
-        return string[:max_length-3] + '...'
-    return string
+    return string[:max_length-3] + '...' if len(string) > max_length else string
 
 def match_pair(sequence1: Seq, sequence2: Seq, sequence1_type: str, sequence2_type: str) -> List:
     matches = []
 
     if sequence1_type == 'aa':
         sequence1.sequence = reverse_translate(sequence1.sequence)
-    elif sequence1_type == 'nu':
-        pass
-    else:
+    elif sequence1_type != 'nu':
         raise ValueError('Incorrect input 1 type!')
 
     if sequence2_type == 'aa':
         sequence2.sequence = reverse_translate(sequence2.sequence)
-    elif sequence2_type == 'nu':
-        pass
-    else:
+    elif sequence2_type != 'nu':
         raise ValueError('Incorrect input 2 type!')
 
-    if len(sequence1.sequence) > len(sequence2.sequence):
-        k = len(sequence2.sequence)
-        query = sequence2
-        reference = sequence1
-        reference_type = sequence1_type
-    else:
-        k = len(sequence1.sequence)
-        query = sequence1
-        reference = sequence2
-        reference_type = sequence2_type
+    k = min(len(sequence1.sequence), len(sequence2.sequence))
+    query, reference, reference_type = (sequence2, sequence1, sequence2_type) if len(sequence1.sequence) > len(sequence2.sequence) else (sequence1, sequence2, sequence1_type)
 
     reference_kmers = index_kmers(reference.sequence, k)
     for kmer in reference_kmers:
         if re.fullmatch(create_regex(kmer), query.sequence):
             for index in reference_kmers[kmer]:
-                # print(index, kmer, query.sequence)
-                start = index + 1
-                end = index + k
-                if reference_type == 'nu':
-                    pass
-                elif reference_type == 'aa':
-                    start = int(start / 3) + 1
-                    end = int(end / 3)
+                start, end = index + 1, index + k
+                if reference_type == 'aa':
+                    start, end = (start // 3) + 1, end // 3
                 matches.append((query.id, reference.id, f'{start}..{end}'))
 
     return matches
@@ -149,10 +121,8 @@ def match_pair(sequence1: Seq, sequence2: Seq, sequence1_type: str, sequence2_ty
 def process_concurrently(sequences1: List[Seq], sequences2: List[Seq], sequences1_type: str, sequences2_type: str, output_file: str) -> None:
     results = []
 
-    max_workers = os.cpu_count()
-
-    # Use ProcessPoolExecutor to parallelize the execution
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+    max_workers = os.cpu_count() or 1  # Set the number of workers to the number of CPU cores or 1 if not available
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         func = partial(match_pair, sequence1_type=sequences1_type, sequence2_type=sequences2_type)
         futures = [executor.submit(func, sequence1, sequence2) for sequence1, sequence2 in product(sequences1, sequences2)]
         for future in concurrent.futures.as_completed(futures):
