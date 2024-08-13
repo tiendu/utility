@@ -21,6 +21,9 @@ class Seq:
     id: str
     sequence: str
 
+    def __post_init__(self):
+        object.__setattr__(self, 'sequence', self.sequence.upper())
+
     def transcribe(self) -> 'Seq':
         '''Convert DNA sequence to RNA sequence.'''
         return Seq(self.id, self.sequence.replace('T', 'U'))
@@ -38,7 +41,7 @@ class Seq:
 
     def locate_subsequence(self, subsequence: str) -> Tuple[int, int]:
         '''Locate the start and end positions of a subsequence within the original sequence.'''
-        match = re.search(subsequence, self.sequence)
+        match = re.search(re.escape(subsequence), self.sequence, re.IGNORECASE)
         if match:
             return match.start(), match.end()
         else:
