@@ -27,9 +27,8 @@ class Seq:
 
     def reverse_complement(self) -> 'Seq':
         '''Calculate the reverse complement of the DNA sequence.'''
-        complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'}
-        rev_comp_seq = ''.join(complement.get(base, base) for base in reversed(self.sequence))
-        return Seq(self.id, rev_comp_seq)
+        complement = str.maketrans('ATGC', 'TACG')
+        return Seq(self.id, self.sequence[::-1].translate(complement))
 
     def extract_subsequence(self, start: int, end: int) -> 'Seq':
         '''Extract a subsequence given a start and end position.'''
