@@ -68,12 +68,38 @@ def reverse_translate(sequence: str) -> str:
         'P': 'CCN', 'T': 'ACN', 'V': 'GTN', 'I': 'ATH',
         '*': 'TRR', 'X': 'NNN'
     }
-    trans_table = str.maketrans(aa_to_nu)
-    try:
-        rev_trans = sequence.translate(trans_table)
-    except KeyError as e:
-        raise ValueError(f"Invalid amino acid '{e.args[0]}' in sequence. Valid amino acids: {list(aa_to_nu.keys())}") from e
-    return rev_trans
+    rev_trans = []
+    for aa in sequence:
+        if aa in aa_to_nu:
+            rev_trans.append(aa_to_nu[aa])
+        else:
+            raise ValueError(f"Unexpected amino acid '{aa}' encountered in sequence.")
+    return ''.join(rev_trans)
+
+def delineate(dna: str) -> List[str]:
+    conversion = {
+        'A': ['A'],
+        'C': ['C'],
+        'G': ['G'],
+        'T': ['T'],
+        'R': ['A', 'G'],
+        'Y': ['C', 'T'],
+        'S': ['G', 'C'],
+        'W': ['A', 'T'],
+        'K': ['G', 'T'],
+        'M': ['A', 'C'],
+        'B': ['C', 'G', 'T'],
+        'D': ['A', 'G', 'T'],
+        'H': ['A', 'C', 'T'],
+        'V': ['A', 'C', 'G'],
+        'N': ['A', 'T', 'G', 'C'],
+    }
+
+    all_variants = ['']
+    for nucleotide in dna:
+        all_variants = [prefix + base for prefix in all_variants for base in conversion.get(nucleotide, [nucleotide])]
+    
+    return all_variants
 
 def get_minimizers(sequence: str, k: int, w: int) -> Dict[str, Set[int]]:
     minimizers = defaultdict(set)
@@ -102,17 +128,27 @@ def match_minimizers(query_minimizers: Dict[str, Set[int]], reference_minimizers
 
 def map_query_to_reference(query: Seq, reference: Seq, k: int, w: int, threshold: float) -> List[Tuple[str, str, int, float]]:
     matches = []
-    reference_minimizers = get_minimizers(reference.sequence, k, w)
-    query_minimizers = get_minimizers(query.sequence, k, w)
     
-    similarity = match_minimizers(query_minimizers, reference_minimizers, threshold)
+    # Reverse translate if the query or reference is an amino acid sequence
+    query_seq = reverse_translate(query.sequence) if query.id.endswith("aa") else query.sequence
+    reference_seq = reverse_translate(reference.sequence) if reference.id.endswith("aa") else reference.sequence
     
-    if similarity >= threshold:
-        # Find matching positions
-        for kmer in query_minimizers:
-            if kmer in reference_minimizers:
-                for ref_pos in reference_minimizers[kmer]:
-                    matches.append((query.id, reference.id, ref_pos, similarity))
+    # Delineate sequences
+    query_variants = delineate(query_seq)
+    reference_variants = delineate(reference_seq)
+    
+    for query_variant in query_variants:
+        for reference_variant in reference_variants:
+            reference_minimizers = get_minimizers(reference_variant, k, w)
+            query_minimizers = get_minimizers(query_variant, k, w)
+            
+            similarity = match_minimizers(query_minimizers, reference_minimizers, threshold)
+            
+            if similarity >= threshold:
+                for kmer in query_minimizers:
+                    if kmer in reference_minimizers:
+                        for ref_pos in reference_minimizers[kmer]:
+                            matches.append((query.id, reference.id, ref_pos, similarity))
     
     return matches
 
