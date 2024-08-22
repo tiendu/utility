@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import gzip
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Dict
 from itertools import groupby
 from collections import Counter
@@ -126,6 +127,18 @@ def index(sequences: List[Seq], k: int) -> Dict[str, Seq]:
 
     return kmer_index
 
+def process_sequence(seq: Seq, mode: str) -> List[Seq]:
+    if mode == 'aa':
+        seq.sequence = reverse_translate(seq.sequence)
+    
+    delineated_variants = []
+    variants = delineate(seq.sequence)
+    for i, var in enumerate(variants, 1):
+        new_id = f'{seq.id}_{i}'
+        delineated_variants.append(Seq(new_id, var, seq.quality))
+    
+    return delineated_variants
+
 def main():
     parser = argparse.ArgumentParser(description='Process sequences from FASTA/FASTQ files.')
     parser.add_argument('-i', '--input', type=str, required=True, help='Path to the input sequence file (FASTA/FASTQ).')
@@ -143,11 +156,11 @@ def main():
             seq.sequence = reverse_translate(seq.sequence)
 
     delineated_sequences = []
-    for seq in seqs:
-        variants = delineate(seq.sequence)
-        for i, var in enumerate(variants, 1):
-            new_id = f'{seq.id}_{i}'
-            delineated_sequences.append(Seq(new_id, var, seq.quality))
+    with ProcessPoolExecutor() as executor:
+        future_to_seq = {executor.submit(process_sequence, seq, args.mode): seq for seq in seqs}
+        for future in as_completed(future_to_seq):
+            result = future.result()
+            delineated_sequences.extend(result)
 
     k = min(len(seq.sequence) // 2 | 1 for seq in delineated_sequences)
     kmer_index = index(delineated_sequences, k)
