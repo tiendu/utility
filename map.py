@@ -110,7 +110,6 @@ def generate_hashed_kmers(string: str, k: int) -> Generator[str, None, None]:
         yield hash_string(kmer)
 
 def cosine_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
-    """Calculate cosine similarity between k-mer frequency vectors."""
     intersection = set(query_kmers) & set(reference_kmers)
     dot_product = sum(query_kmers[kmer] * reference_kmers[kmer] for kmer in intersection)
     norm_query = sqrt(sum(count**2 for count in query_kmers.values()))
@@ -121,12 +120,30 @@ def cosine_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
     
     return dot_product / (norm_query * norm_reference)
 
+def calculate_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
+    common_kmers_count = 0
+    query_only_count = 0
+    
+    for kmer, count in query_kmers.items():
+        if kmer in reference_kmers:
+            common_kmers_count += count
+        else:
+            query_only_count += count
+    
+    if common_kmers_count == 0:
+        return 0.0
+
+    similarity = sqrt(common_kmers_count) - sqrt(query_only_count)
+    normalized_similarity = similarity / sqrt(common_kmers_count)
+    
+    return normalized_similarity
+
 def map_query_to_reference(query: Seq, reference: Seq, threshold: float) -> List[Tuple[str, str, float]]:
-    k = len(query.sequence) // 4 | 1
+    k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = Counter(generate_hashed_kmers(query.sequence, k))
     reference_kmers = Counter(generate_hashed_kmers(reference.sequence, k))
     
-    similarity = cosine_similarity(query_kmers, reference_kmers)
+    similarity = calculate_similarity(query_kmers, reference_kmers)
     
     if similarity >= threshold:
         return [(query.id, reference.id, similarity)]
