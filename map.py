@@ -1,4 +1,3 @@
-
 import hashlib
 from typing import List, Tuple, Dict, Generator, Set
 from dataclasses import dataclass
@@ -17,7 +16,6 @@ import argparse
 # Constants
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
 FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
-K = 11  # Fixed length for k-mers
 
 @dataclass(frozen=True)
 class Seq:
@@ -111,21 +109,6 @@ def generate_hashed_kmers(string: str, k: int) -> Generator[str, None, None]:
         kmer = string[i:i + k]
         yield hash_string(kmer)
 
-def calculate_normalized_similarity(query_kmers: Set[str], reference_kmers: Set[str], query_len: int, reference_len: int) -> float:
-    """Calculate normalized similarity based on k-mer sets."""
-    intersection = query_kmers & reference_kmers
-    union = query_kmers | reference_kmers
-    if not union:
-        return 0.0
-    jaccard_index = len(intersection) / len(union)
-    
-    # Normalize based on the length of the sequences
-    query_normalization = len(query_kmers) / query_len
-    reference_normalization = len(reference_kmers) / reference_len
-    
-    # Return the average of Jaccard index and the normalized values
-    return (jaccard_index + query_normalization + reference_normalization) / 3
-
 def cosine_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
     """Calculate cosine similarity between k-mer frequency vectors."""
     intersection = set(query_kmers) & set(reference_kmers)
@@ -138,12 +121,12 @@ def cosine_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
     
     return dot_product / (norm_query * norm_reference)
 
-def map_query_to_reference(query: Seq, reference: Seq, k: int, threshold: float) -> List[Tuple[str, str, float]]:
+def map_query_to_reference(query: Seq, reference: Seq, threshold: float) -> List[Tuple[str, str, float]]:
+    k = len(query.sequence) // 4 | 1
     query_kmers = Counter(generate_hashed_kmers(query.sequence, k))
     reference_kmers = Counter(generate_hashed_kmers(reference.sequence, k))
     
-    # similarity = cosine_similarity(query_kmers, reference_kmers)
-    similarity = calculate_normalized_similarity(query_kmers, reference_kmers, len(query.sequence), len(reference.sequence))
+    similarity = cosine_similarity(query_kmers, reference_kmers)
     
     if similarity >= threshold:
         return [(query.id, reference.id, similarity)]
@@ -159,7 +142,7 @@ def process_concurrently(query_sequences: List[Seq],
 
     max_workers = os.cpu_count() or 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        func = partial(map_query_to_reference, k=k, threshold=similarity_threshold)
+        func = partial(map_query_to_reference, threshold=similarity_threshold)
         futures = [executor.submit(func, query, reference) for query, reference in product(query_sequences, reference_sequences)]
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
@@ -179,7 +162,7 @@ def main():
     parser.add_argument("--reference", required=True, help="Path to the reference input file")
     parser.add_argument("--query_type", choices=["nu", "aa"], required=True, help="Type of the query input file (nu for nucleotide, aa for amino acid)")
     parser.add_argument("--reference_type", choices=["nu", "aa"], required=True, help="Type of the reference input file (nu for nucleotide, aa for amino acid)")
-    parser.add_argument("-t", "--threshold", type=float, default=0.01, help="Similarity threshold for sequence matching (default: 0.8)")
+    parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Similarity threshold for sequence matching (default: 0.5)")
     parser.add_argument("-o", "--output", required=True, help="Path to the output CSV file")
     
     args = parser.parse_args()
