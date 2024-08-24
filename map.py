@@ -135,8 +135,9 @@ def map_query_to_reference(query: Seq, reference: Seq, threshold: float) -> List
 
 def process_concurrently(query_sequences: List[Seq], 
                          reference_sequences: List[Seq], 
-                         query_type: str, reference_type: str, 
-                         k: int, similarity_threshold: float, 
+                         query_type: str, 
+                         reference_type: str,
+                         similarity_threshold: float, 
                          output_file: str) -> None:
     results = []
 
@@ -178,7 +179,7 @@ def main():
     query_sequences.sort(key=lambda x: len(x.sequence), reverse=True)
     reference_sequences.sort(key=lambda x: len(x.sequence), reverse=True)
     
-    process_concurrently(query_sequences, reference_sequences, args.query_type, args.reference_type, K, args.threshold, args.output)
+    process_concurrently(query_sequences, reference_sequences, args.query_type, args.reference_type, args.threshold, args.output)
 
 if __name__ == "__main__":
     main()
