@@ -1,11 +1,8 @@
 import hashlib
-from typing import List, Tuple, Dict, Generator, Set
+from typing import List, Tuple, Generator
 from dataclasses import dataclass
 import concurrent.futures
 import os
-from functools import partial
-from itertools import product, groupby
-import sys
 import csv
 import gzip
 from pathlib import Path
@@ -28,7 +25,7 @@ class Seq:
 
 def read_sequences(file_path: Path) -> List[Seq]:
     sequences = []
-    file_type = ''
+    file_type = None
 
     if any(file_path.suffix in ext for ext in FASTQ_EXTENSIONS):
         file_type = 'FASTQ'
@@ -41,21 +38,27 @@ def read_sequences(file_path: Path) -> List[Seq]:
 
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
-            groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
-            for _, group in groups:
-                header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
-                name = header_line[1:]
-                seq = sequence_line.upper()
-                qual = quality_line.upper()
-                sequences.append(Seq(name, seq, qual))
+            while True:
+                header_line = fin.readline().strip()
+                if not header_line:
+                    break
+                sequence_line = fin.readline().strip()
+                _ = fin.readline().strip()  # Plus line
+                quality_line = fin.readline().strip()
+                sequences.append(Seq(header_line[1:], sequence_line, quality_line))
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
-            faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
-            for header in faiter:
-                headerstr = next(header).strip()
-                name = headerstr[1:]
-                seq = ''.join(s.strip().upper() for s in next(faiter))
-                sequences.append(Seq(name, seq))
+            seq_id, seq = None, []
+            for line in fin:
+                line = line.strip()
+                if line.startswith('>'):
+                    if seq_id:
+                        sequences.append(Seq(seq_id, ''.join(seq)))
+                    seq_id, seq = line[1:], []
+                else:
+                    seq.append(line.upper())
+            if seq_id:
+                sequences.append(Seq(seq_id, ''.join(seq)))
 
     return sequences
 
@@ -68,82 +71,45 @@ def reverse_translate(sequence: str) -> str:
         'P': 'CCN', 'T': 'ACN', 'V': 'GTN', 'I': 'ATH',
         '*': 'TRR', 'X': 'NNN'
     }
-    rev_trans = []
-    for aa in sequence:
-        if aa in aa_to_nu:
-            rev_trans.append(aa_to_nu[aa])
-        else:
-            raise ValueError(f"Unexpected amino acid '{aa}' encountered in sequence.")
-    return ''.join(rev_trans)
+    return ''.join(aa_to_nu.get(aa, 'NNN') for aa in sequence)
 
 def delineate(dna: str) -> List[str]:
     conversion = {
-        'A': ['A'],
-        'C': ['C'],
-        'G': ['G'],
-        'T': ['T'],
-        'R': ['A', 'G'],
-        'Y': ['C', 'T'],
-        'S': ['G', 'C'],
-        'W': ['A', 'T'],
-        'K': ['G', 'T'],
-        'M': ['A', 'C'],
-        'B': ['C', 'G', 'T'],
-        'D': ['A', 'G', 'T'],
-        'H': ['A', 'C', 'T'],
-        'V': ['A', 'C', 'G'],
+        'A': ['A'], 'C': ['C'], 'G': ['G'], 'T': ['T'],
+        'R': ['A', 'G'], 'Y': ['C', 'T'], 'S': ['G', 'C'],
+        'W': ['A', 'T'], 'K': ['G', 'T'], 'M': ['A', 'C'],
+        'B': ['C', 'G', 'T'], 'D': ['A', 'G', 'T'],
+        'H': ['A', 'C', 'T'], 'V': ['A', 'C', 'G'],
         'N': ['A', 'T', 'G', 'C'],
     }
 
-    all_variants = ['']
+    variants = ['']
     for nucleotide in dna:
-        all_variants = [prefix + base for prefix in all_variants for base in conversion.get(nucleotide, [nucleotide])]
+        variants = [prefix + base for prefix in variants for base in conversion.get(nucleotide, [nucleotide])]
     
-    return all_variants
+    return variants
 
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
 
 def generate_hashed_kmers(string: str, k: int) -> Generator[str, None, None]:
     for i in range(len(string) - k + 1):
-        kmer = string[i:i + k]
-        yield hash_string(kmer)
-
-def cosine_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
-    intersection = set(query_kmers) & set(reference_kmers)
-    dot_product = sum(query_kmers[kmer] * reference_kmers[kmer] for kmer in intersection)
-    norm_query = sqrt(sum(count**2 for count in query_kmers.values()))
-    norm_reference = sqrt(sum(count**2 for count in reference_kmers.values()))
-    
-    if norm_query == 0 or norm_reference == 0:
-        return 0.0
-    
-    return dot_product / (norm_query * norm_reference)
+        yield hash_string(string[i:i + k])
 
 def calculate_similarity_and_coverage(query_kmers: Counter, reference_kmers: Counter) -> Tuple[float, float]:
-    common_kmer_count = 0
-    query_unique_count = 0
-    reference_unique_count = 0
-    
-    for kmer, count in query_kmers.items():
-        if kmer in reference_kmers:
-            common_kmer_count += count
-        else:
-            query_unique_count += count
-    
-    for kmer, count in reference_kmers.items():
-        if kmer not in query_kmers:
-            reference_unique_count += count
+    common_kmer_count = sum(min(query_kmers[kmer], reference_kmers.get(kmer, 0)) for kmer in query_kmers)
+    query_unique_count = sum(query_kmers[kmer] for kmer in query_kmers if kmer not in reference_kmers)
+    reference_total_count = sum(reference_kmers.values())
     
     if common_kmer_count == 0:
         return 0.0, 0.0
     
     similarity = (common_kmer_count - query_unique_count) / common_kmer_count
-    coverage = common_kmer_count / (common_kmer_count + reference_unique_count)
+    coverage = common_kmer_count / reference_total_count
     
     return similarity, coverage
 
-def map_query_to_reference(query: Seq, reference: Seq, threshold: float) -> List[Tuple[str, str, float]]:
+def map_query_to_reference(query: Seq, reference: Seq, threshold: float) -> List[Tuple[str, str, float, float]]:
     k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = Counter(generate_hashed_kmers(query.sequence, k))
     reference_kmers = Counter(generate_hashed_kmers(reference.sequence, k))
@@ -157,8 +123,6 @@ def map_query_to_reference(query: Seq, reference: Seq, threshold: float) -> List
 
 def process_concurrently(query_sequences: List[Seq], 
                          reference_sequences: List[Seq], 
-                         query_type: str, 
-                         reference_type: str,
                          similarity_threshold: float, 
                          output_file: str) -> None:
     results = []
@@ -197,11 +161,10 @@ def main():
         print("Error: One or both input files are empty.")
         sys.exit(1)
     
-    # Sort sequences by length in descending order
     query_sequences.sort(key=lambda x: len(x.sequence), reverse=True)
     reference_sequences.sort(key=lambda x: len(x.sequence), reverse=True)
     
-    process_concurrently(query_sequences, reference_sequences, args.query_type, args.reference_type, args.threshold, args.output)
+    process_concurrently(query_sequences, reference_sequences, args.threshold, args.output)
 
 if __name__ == "__main__":
     main()
