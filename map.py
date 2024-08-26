@@ -120,33 +120,38 @@ def cosine_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
     
     return dot_product / (norm_query * norm_reference)
 
-def calculate_similarity(query_kmers: Counter, reference_kmers: Counter) -> float:
-    common_kmers_count = 0
-    query_only_count = 0
+def calculate_similarity_and_coverage(query_kmers: Counter, reference_kmers: Counter) -> Tuple[float, float]:
+    common_kmer_count = 0
+    query_unique_count = 0
+    reference_unique_count = 0
     
     for kmer, count in query_kmers.items():
         if kmer in reference_kmers:
-            common_kmers_count += count
+            common_kmer_count += count
         else:
-            query_only_count += count
+            query_unique_count += count
     
-    if common_kmers_count == 0:
-        return 0.0
-
-    similarity = sqrt(common_kmers_count) - sqrt(query_only_count)
-    normalized_similarity = similarity / sqrt(common_kmers_count)
+    for kmer, count in reference_kmers.items():
+        if kmer not in query_kmers:
+            reference_unique_count += count
     
-    return normalized_similarity
+    if common_kmer_count == 0:
+        return 0.0, 0.0
+    
+    similarity = (common_kmer_count - query_unique_count) / common_kmer_count
+    coverage = common_kmer_count / (common_kmer_count + reference_unique_count)
+    
+    return similarity, coverage
 
 def map_query_to_reference(query: Seq, reference: Seq, threshold: float) -> List[Tuple[str, str, float]]:
     k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = Counter(generate_hashed_kmers(query.sequence, k))
     reference_kmers = Counter(generate_hashed_kmers(reference.sequence, k))
     
-    similarity = calculate_similarity(query_kmers, reference_kmers)
+    similarity, coverage = calculate_similarity_and_coverage(query_kmers, reference_kmers)
     
     if similarity >= threshold:
-        return [(query.id, reference.id, similarity)]
+        return [(query.id, reference.id, similarity, coverage)]
     
     return []
 
@@ -168,7 +173,7 @@ def process_concurrently(query_sequences: List[Seq],
                 results.extend(result)
 
     if results:
-        headers = ['Query_ID', 'Reference_ID', 'Similarity']
+        headers = ['Query_ID', 'Reference_ID', 'Similarity', 'Coverage']
         with open(output_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(headers)
