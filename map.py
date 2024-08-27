@@ -2,6 +2,8 @@ import hashlib
 from typing import List, Tuple, Generator
 from dataclasses import dataclass
 import concurrent.futures
+from functools import partial
+from itertools import groupby, product
 import os
 import csv
 import gzip
