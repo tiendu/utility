@@ -2,6 +2,7 @@ from html import unescape
 import sys
 import struct
 import re
+import json
 
 def remove_html_tags(text):
     '''Remove HTML/XML tags from the text.'''
@@ -13,7 +14,7 @@ def clean_notes(text):
     # Regular expression to capture tag content
     pattern = re.compile(r'<(\w+)>(.*?)</\1>', re.DOTALL)
 
-    notes = []
+    notes = {} 
     
     # Extract and decode content
     for match in pattern.finditer(text):
@@ -21,9 +22,9 @@ def clean_notes(text):
         # Decode HTML entities
         decoded_content = unescape(content)
         decoded_content = re.sub(r'<.*?>', '', decoded_content)
-        notes.append(f'"{tag}": "{decoded_content}"')
+        notes[tag] = decoded_content
 
-    return '; '.join(notes)
+    return notes
 
 def unpack_data(file_obj, size, mode):
     '''Unpack data from the file object.'''
@@ -97,8 +98,8 @@ def parse_notes(block_content):
     note_pattern = re.compile(r'<(\w+)>(.*?)</\1>', re.DOTALL)
 
     for match in note_pattern.findall(block_content):
-        key, value = match
-        notes[key] = clean_notes(value)
+        _, value = match
+        notes = clean_notes(value)
 
     return notes
 
@@ -163,6 +164,9 @@ if __name__ == '__main__':
         print('Usage: python extract_features.py <path_to_dna_file>')
         sys.exit(1)
 
-    dna_file_path = sys.argv[1]
-    result = parse_snapgene_file(filepath=dna_file_path)
-    print(result)
+    input_path = sys.argv[1]
+    output_path = sys.argv[2]
+    result = parse_snapgene_file(filepath=input_path)
+
+    with open(output_path, 'w') as json_file:
+        json.dump(result, json_file, indent=4)
