@@ -1,3 +1,4 @@
+
 import hashlib
 from typing import List, Tuple, Generator
 from dataclasses import dataclass
@@ -64,43 +65,6 @@ def read_sequences(file_path: Path) -> List[Seq]:
 
     return sequences
 
-def reverse_translate(sequence: str) -> str:
-    aa_to_nu = {
-        'W': 'TGG', 'Y': 'TAY', 'C': 'TGY', 'E': 'GAR',
-        'K': 'AAR', 'Q': 'CAR', 'S': 'WSN', 'L': 'YTN',
-        'R': 'MGN', 'G': 'GGN', 'F': 'TTY', 'D': 'GAY',
-        'H': 'CAY', 'N': 'AAY', 'M': 'ATG', 'A': 'GCN',
-        'P': 'CCN', 'T': 'ACN', 'V': 'GTN', 'I': 'ATH',
-        '*': 'TRR', 'X': 'NNN'
-    }
-
-    return ''.join(aa_to_nu.get(aa, 'NNN') for aa in sequence)
-
-def delineate(dna: str) -> List[str]:
-    conversion = {
-        'A': ['A'], 'C': ['C'], 'G': ['G'], 'T': ['T'],
-        'R': ['A', 'G'], 'Y': ['C', 'T'], 'S': ['G', 'C'],
-        'W': ['A', 'T'], 'K': ['G', 'T'], 'M': ['A', 'C'],
-        'B': ['C', 'G', 'T'], 'D': ['A', 'G', 'T'],
-        'H': ['A', 'C', 'T'], 'V': ['A', 'C', 'G'],
-        'N': ['A', 'T', 'G', 'C'],
-    }
-
-    variants = ['']
-    for nucleotide in dna:
-        variants = [prefix + base for prefix in variants for base in conversion.get(nucleotide, [nucleotide])]
-    
-    return variants
-
-def expand_sequences(sequences: List[Seq]) -> List[Seq]:
-    expanded_sequences = []
-
-    for seq in sequences:
-        delineated_seqs = delineate(seq.sequence)
-        expanded_sequences.extend([Seq(seq.id, variant) for variant in delineated_seqs])
-
-    return expanded_sequences
-
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
 
@@ -130,18 +94,19 @@ def map_query_to_reference(query: Seq, reference: Seq, similarity_threshold: flo
         coverage = len(subref) / len(reference.sequence)
 
         if similarity >= similarity_threshold and coverage >= coverage_threshold:
-            results.append((query.id, reference.id, f'{i}..{i+len(query.sequence)}', similarity, coverage))
+            results.append((query.id, reference.id, f'{i}..{i+len(query.sequence)}', round(similarity, 3), round(coverage, 3)))
 
-    return results 
+    return results
 
 def process_concurrently(query_sequences: List[Seq], 
                          reference_sequences: List[Seq], 
                          similarity_threshold: float, 
                          coverage_threshold: float, 
-                         output_file: str) -> None:
+                         output_file: str,
+                         threads: int) -> None:
     results = []
 
-    max_workers = os.cpu_count() - 1 or 1
+    max_workers = threads or 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         func = partial(map_query_to_reference, similarity_threshold=similarity_threshold, coverage_threshold=coverage_threshold)
         futures = [executor.submit(func, query, reference) for query, reference in product(query_sequences, reference_sequences)]
@@ -161,10 +126,9 @@ def main():
     parser = argparse.ArgumentParser(description="Sequence comparison using k-mers.")
     parser.add_argument("--query", required=True, help="Path to the query input file")
     parser.add_argument("--reference", required=True, help="Path to the reference input file")
-    parser.add_argument("--query_type", choices=["nu", "aa"], required=True, help="Type of the query input file (nu for nucleotide, aa for amino acid)")
-    parser.add_argument("--reference_type", choices=["nu", "aa"], required=True, help="Type of the reference input file (nu for nucleotide, aa for amino acid)")
-    parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Similarity threshold for sequence matching (default: 0.5)")
+    parser.add_argument("-s", "--similarity", type=float, default=0.5, help="Similarity threshold for sequence matching (default: 0.5)")
     parser.add_argument("-c", "--coverage", type=float, default=0.0, help="Coverage threshold for sequence matching (default: 0.0)")
+    parser.add_argument("-t", "--threads", type=int, help="Number of threads")
     parser.add_argument("-o", "--output", required=True, help="Path to the output CSV file")
     
     args = parser.parse_args()
@@ -176,14 +140,7 @@ def main():
         print("Error: One or both input files are empty.")
         sys.exit(1)
 
-    if args.query_type == 'aa':
-        query_sequences = [Seq(seq.id, reverse_translate(seq.sequence)) for seq in query_sequences]
-    if args.reference_type == 'aa':
-        reference_sequences = [Seq(seq.id, reverse_translate(seq.sequence)) for seq in reference_sequences]
-
-    query_sequences = expand_sequences(query_sequences)
-    reference_sequences = expand_sequences(reference_sequences)
-    process_concurrently(query_sequences, reference_sequences, args.threshold, args.coverage, args.output)
+    process_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, args.output, args.threads)
 
 if __name__ == "__main__":
     main()
