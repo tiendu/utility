@@ -1,6 +1,6 @@
-
 import hashlib
 from typing import List, Tuple, Generator
+from collections import Counter
 from dataclasses import dataclass
 import concurrent.futures
 from functools import partial
@@ -72,17 +72,23 @@ def generate_hashed_kmers(string: str, k: int) -> Generator[str, None, None]:
     for i in range(len(string) - k + 1):
         yield hash_string(string[i:i + k])
 
-def cosine_similarity_ordered(query_kmers: List[str], reference_kmers: List[str]) -> float:
-    dot_product = sum(1 for q_kmer, r_kmer in zip(query_kmers, reference_kmers) if q_kmer == r_kmer)
-    norm_query = sqrt(len(query_kmers))
-    norm_reference = sqrt(len(reference_kmers))
+def cosine_similarity(query_kmers: list[str], reference_kmers: list[str]) -> float:
+    query_kmers = Counter(query_kmers)
+    reference_kmers = Counter(reference_kmers)
+    intersection = set(query_kmers) & set(reference_kmers)
+    dot_product = sum(query_kmers[kmer] * reference_kmers[kmer] for kmer in intersection)
+    norm_query = sqrt(sum(count**2 for count in query_kmers.values()))
+    norm_reference = sqrt(sum(count**2 for count in reference_kmers.values()))
     
     if norm_query == 0 or norm_reference == 0:
         return 0.0
-    
+
     return dot_product / (norm_query * norm_reference)
 
-def map_query_to_reference(query: Seq, reference: Seq, similarity_threshold: float, coverage_threshold: float) -> List[Tuple[str, str, str, float, float]]:
+def map_query_to_reference(query: Seq, 
+                           reference: Seq, 
+                           similarity_threshold: float, 
+                           coverage_threshold: float) -> List[Tuple[str, str, str, float, float]]:
     k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = list(generate_hashed_kmers(query.sequence, k))
     results = []
@@ -90,7 +96,7 @@ def map_query_to_reference(query: Seq, reference: Seq, similarity_threshold: flo
     for i in range(len(reference.sequence) - len(query.sequence) + 1):
         subref = reference.sequence[i:i + len(query.sequence)]
         subref_kmers = list(generate_hashed_kmers(subref, k))
-        similarity = cosine_similarity_ordered(query_kmers, subref_kmers)
+        similarity = cosine_similarity(query_kmers, subref_kmers)
         coverage = len(subref) / len(reference.sequence)
 
         if similarity >= similarity_threshold and coverage >= coverage_threshold:
@@ -126,7 +132,7 @@ def main():
     parser = argparse.ArgumentParser(description="Sequence comparison using k-mers.")
     parser.add_argument("--query", required=True, help="Path to the query input file")
     parser.add_argument("--reference", required=True, help="Path to the reference input file")
-    parser.add_argument("-s", "--similarity", type=float, default=0.5, help="Similarity threshold for sequence matching (default: 0.5)")
+    parser.add_argument("-s", "--similarity", type=float, default=0.8, help="Similarity threshold for sequence matching (default: 0.5)")
     parser.add_argument("-c", "--coverage", type=float, default=0.0, help="Coverage threshold for sequence matching (default: 0.0)")
     parser.add_argument("-t", "--threads", type=int, help="Number of threads")
     parser.add_argument("-o", "--output", required=True, help="Path to the output CSV file")
