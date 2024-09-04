@@ -93,7 +93,7 @@ def euclidean_similarity(query_kmers: List[str], reference_kmers: List[str]) -> 
     euclidean_dist = sqrt(sum_of_squares)
     max_possible_dist = sqrt(len(all_kmers))
     
-    if max_possible_distance == 0:
+    if max_possible_dist == 0:
         return 0.0
     
     norm_dist = euclidean_dist / max_possible_dist  # Normalize the distance to be in the range [0, 1]
