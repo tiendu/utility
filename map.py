@@ -85,10 +85,27 @@ def cosine_similarity(query_kmers: list[str], reference_kmers: list[str]) -> flo
 
     return dot_product / (norm_query * norm_reference)
 
+def euclidean_similarity(query_kmers: List[str], reference_kmers: List[str]) -> float:
+    query_kmers = Counter(query_kmers)
+    reference_kmers = Counter(reference_kmers)
+    all_kmers = set(query_kmers.keys()).union(set(reference_kmers.keys()))    
+    sum_of_squares = sum((query_kmers[kmer] - reference_kmers[kmer]) ** 2 for kmer in all_kmers)
+    euclidean_dist = sqrt(sum_of_squares)
+    max_possible_dist = sqrt(len(all_kmers))
+    
+    if max_possible_distance == 0:
+        return 0.0
+    
+    norm_dist = euclidean_dist / max_possible_dist  # Normalize the distance to be in the range [0, 1]
+    norm_similarity = 1 - norm_dist  # Convert to a similarity measure: similarity = 1 - normalized distance
+    
+    return norm_similarity
+
 def map_query_to_reference(query: Seq, 
                            reference: Seq, 
                            similarity_threshold: float, 
-                           coverage_threshold: float) -> List[Tuple[str, str, str, float, float]]:
+                           coverage_threshold: float,
+                           similarity_func=euclidean_similarity) -> List[Tuple[str, str, str, float, float]]:
     k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = list(generate_hashed_kmers(query.sequence, k))
     results = []
@@ -96,7 +113,7 @@ def map_query_to_reference(query: Seq,
     for i in range(len(reference.sequence) - len(query.sequence) + 1):
         subref = reference.sequence[i:i + len(query.sequence)]
         subref_kmers = list(generate_hashed_kmers(subref, k))
-        similarity = cosine_similarity(query_kmers, subref_kmers)
+        similarity = similarity_func(query_kmers, subref_kmers)
         coverage = len(subref) / len(reference.sequence)
 
         if similarity >= similarity_threshold and coverage >= coverage_threshold:
