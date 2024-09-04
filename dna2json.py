@@ -13,9 +13,8 @@ def remove_html_tags(text):
 def clean_notes(text):
     # Regular expression to capture tag content
     pattern = re.compile(r'<(\w+)>(.*?)</\1>', re.DOTALL)
-
     notes = {} 
-    
+
     # Extract and decode content
     for match in pattern.finditer(text):
         tag, content = match.groups()
@@ -94,6 +93,7 @@ def parse_snapgene_file(filepath=None, file_obj=None):
 def parse_notes(block_content):
     '''Parse notes from the block content.'''
     notes = {}
+
     # Simple regex to extract key-value pairs in the notes section
     note_pattern = re.compile(r'<(\w+)>(.*?)</\1>', re.DOTALL)
 
@@ -113,7 +113,6 @@ def parse_features(features_content, strand_mapping):
     for feature_match in feature_pattern.findall(features_content):
         feature_attributes = feature_match[0].strip()
         feature_body = feature_match[1].strip()
-
         # Extract attributes like type, name, and directionality
         feature_type = re.search(r'type="([^"]+)"', feature_attributes).group(1) if re.search(r'type="([^"]+)"', feature_attributes) else None
         feature_name = re.search(r'name="([^"]+)"', feature_attributes).group(1) if re.search(r'name="([^"]+)"', feature_attributes) else None
@@ -159,9 +158,31 @@ def parse_features(features_content, strand_mapping):
 
     return features
 
+def write_fasta(struct):
+    sequence = struct['sequence']
+    features = struct['features']
+
+    for feature in features:
+        if feature['type'] and feature['name']:
+            start = feature['start']
+            end = feature['end']
+            strand = feature['strand']
+            header = feature['type'] + '|' + feature['name'] + '|' + strand + '|' + f'{start}..{end}'
+            subsequence = sequence[start:end]
+
+            if strand == '-':
+                subsequence = reverse_complement(subsequence)
+
+            print(f'>{header}\n{subsequence}')
+
+def reverse_complement(dna):
+    complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
+
+    return dna[::-1].translate(complement)
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print('Usage: python extract_features.py <path_to_dna_file>')
+        print(f'Usage: python {sys.argv[0]} <path_to_dna_file> <path_to_json_output>')
         sys.exit(1)
 
     input_path = sys.argv[1]
@@ -170,3 +191,5 @@ if __name__ == '__main__':
 
     with open(output_path, 'w') as json_file:
         json.dump(result, json_file, indent=4)
+
+    write_fasta(result)
