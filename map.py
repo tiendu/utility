@@ -65,6 +65,11 @@ def read_sequences(file_path: Path) -> List[Seq]:
 
     return sequences
 
+def reverse_complement(dna):
+    complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
+
+    return dna[::-1].translate(complement)
+
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
 
@@ -105,7 +110,7 @@ def map_query_to_reference(query: Seq,
                            reference: Seq, 
                            similarity_threshold: float, 
                            coverage_threshold: float,
-                           similarity_func=euclidean_similarity) -> List[Tuple[str, str, str, float, float]]:
+                           similarity_func=euclidean_similarity) -> List[Tuple[str, str, str, float, float, str]]:
     k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = list(generate_hashed_kmers(query.sequence, k))
     results = []
@@ -113,11 +118,23 @@ def map_query_to_reference(query: Seq,
     for i in range(len(reference.sequence) - len(query.sequence) + 1):
         subref = reference.sequence[i:i + len(query.sequence)]
         subref_kmers = list(generate_hashed_kmers(subref, k))
-        similarity = similarity_func(query_kmers, subref_kmers)
+        rev_complement_seq = reverse_complement(subref)
+        rev_complement_kmers = list(generate_hashed_kmers(rev_complement_seq, k))
+
+        fwd_similarity = similarity_func(query_kmers, subref_kmers)
+        rev_similarity = similarity_func(query_kmers, rev_complement_kmers)
+
+        if fwd_similarity > rev_similarity:
+            best_similarity = fwd_similarity
+            strand = '+'
+        else:
+            best_similarity = rev_similarity
+            strand = '-'
+        
         coverage = len(subref) / len(reference.sequence)
 
-        if similarity >= similarity_threshold and coverage >= coverage_threshold:
-            results.append((query.id, reference.id, f'{i}..{i+len(query.sequence)}', round(similarity, 3), round(coverage, 3)))
+        if best_similarity >= similarity_threshold and coverage >= coverage_threshold:
+            results.append((query.id, reference.id, f'{i}..{i+len(query.sequence)}', round(best_similarity, 3), round(coverage, 3), strand))
 
     return results
 
@@ -139,7 +156,7 @@ def process_concurrently(query_sequences: List[Seq],
                 results.extend(result)
 
     if results:
-        headers = ['Query_ID', 'Reference_ID', 'Region', 'Similarity', 'Coverage']
+        headers = ['Query_ID', 'Reference_ID', 'Region', 'Similarity', 'Coverage', 'Strand']
         with open(output_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(headers)
