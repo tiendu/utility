@@ -158,7 +158,7 @@ def parse_features(features_content, strand_mapping):
 
     return features
 
-def write_fasta(struct):
+def stdout_fasta(struct):
     sequence = struct['sequence']
     features = struct['features']
 
@@ -182,7 +182,7 @@ def reverse_complement(dna):
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print(f'Usage: python {sys.argv[0]} <path_to_dna_file> <path_to_json_output>')
+        print(f'Usage: python {sys.argv[0]} <path_to_dna_input> <path_to_json_output>')
         sys.exit(1)
 
     input_path = sys.argv[1]
@@ -192,4 +192,4 @@ if __name__ == '__main__':
     with open(output_path, 'w') as json_file:
         json.dump(result, json_file, indent=4)
 
-    write_fasta(result)
+    stdout_fasta(result)
