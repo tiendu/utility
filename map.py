@@ -110,6 +110,7 @@ def map_query_to_reference(query: Seq,
                            reference: Seq, 
                            similarity_threshold: float, 
                            coverage_threshold: float,
+                           is_nucleotide: bool,
                            similarity_func=euclidean_similarity) -> List[Tuple[str, str, str, float, float, str]]:
     k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = list(generate_hashed_kmers(query.sequence, k))
@@ -118,19 +119,23 @@ def map_query_to_reference(query: Seq,
     for i in range(len(reference.sequence) - len(query.sequence) + 1):
         subref = reference.sequence[i:i + len(query.sequence)]
         subref_kmers = list(generate_hashed_kmers(subref, k))
-        rev_complement_seq = reverse_complement(subref)
-        rev_complement_kmers = list(generate_hashed_kmers(rev_complement_seq, k))
 
-        fwd_similarity = similarity_func(query_kmers, subref_kmers)
-        rev_similarity = similarity_func(query_kmers, rev_complement_kmers)
+        if is_nucleotide:
+            rev_complement_seq = reverse_complement(subref)
+            rev_complement_kmers = list(generate_hashed_kmers(rev_complement_seq, k))
+            fwd_similarity = similarity_func(query_kmers, subref_kmers)
+            rev_similarity = similarity_func(query_kmers, rev_complement_kmers)
 
-        if fwd_similarity > rev_similarity:
-            best_similarity = fwd_similarity
-            strand = '+'
-        else:
-            best_similarity = rev_similarity
-            strand = '-'
-        
+            if fwd_similarity > rev_similarity:
+                best_similarity = fwd_similarity
+                strand = '+'
+            else:
+                best_similarity = rev_similarity
+                strand = '-'
+        else:  # Amino acid mode: only forward strand
+            best_similarity = similarity_func(query_kmers, subref_kmers)
+            strand = '+'  # No reverse complement for amino acids
+
         coverage = len(subref) / len(reference.sequence)
 
         if best_similarity >= similarity_threshold and coverage >= coverage_threshold:
@@ -142,13 +147,17 @@ def process_concurrently(query_sequences: List[Seq],
                          reference_sequences: List[Seq], 
                          similarity_threshold: float, 
                          coverage_threshold: float, 
+                         is_nucleotide: bool,
                          output_file: str,
                          threads: int) -> None:
     results = []
 
     max_workers = threads or 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        func = partial(map_query_to_reference, similarity_threshold=similarity_threshold, coverage_threshold=coverage_threshold)
+        func = partial(map_query_to_reference, 
+                       similarity_threshold=similarity_threshold, 
+                       coverage_threshold=coverage_threshold, 
+                       is_nucleotide=is_nucleotide)
         futures = [executor.submit(func, query, reference) for query, reference in product(query_sequences, reference_sequences)]
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
@@ -163,13 +172,15 @@ def process_concurrently(query_sequences: List[Seq],
             csv_writer.writerows(results)
 
 def main():
-    parser = argparse.ArgumentParser(description="Sequence comparison using k-mers.")
-    parser.add_argument("--query", required=True, help="Path to the query input file")
-    parser.add_argument("--reference", required=True, help="Path to the reference input file")
-    parser.add_argument("-s", "--similarity", type=float, default=0.8, help="Similarity threshold for sequence matching (default: 0.5)")
-    parser.add_argument("-c", "--coverage", type=float, default=0.0, help="Coverage threshold for sequence matching (default: 0.0)")
-    parser.add_argument("-t", "--threads", type=int, help="Number of threads")
-    parser.add_argument("-o", "--output", required=True, help="Path to the output CSV file")
+    parser = argparse.ArgumentParser(description='Sequence comparison using k-mers.')
+    parser.add_argument('--query', required=True, help='Path to the query input file')
+    parser.add_argument('--reference', required=True, help='Path to the reference input file')
+    parser.add_argument('-s', '--similarity', type=float, default=0.8, help='Similarity threshold for sequence matching (default: 0.8)')
+    parser.add_argument('-c', '--coverage', type=float, default=0.0, help='Coverage threshold for sequence matching (default: 0.0)')
+    parser.add_argument('-t', '--threads', type=int, help='Number of threads')
+    parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
+    parser.add_argument('--mode', choices=['nu', 'aa'], default='nu', 
+                        help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
     
     args = parser.parse_args()
 
@@ -177,10 +188,12 @@ def main():
     reference_sequences = read_sequences(Path(args.reference))
 
     if not query_sequences or not reference_sequences:
-        print("Error: One or both input files are empty.")
+        print('Error: One or both input files are empty.')
         sys.exit(1)
 
-    process_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, args.output, args.threads)
+    is_nucleotide = args.mode == 'nu'
+    
+    process_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, is_nucleotide, args.output, args.threads)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
