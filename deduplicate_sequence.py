@@ -95,12 +95,12 @@ def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key:
 
     return divided_chunks
 
-def deduplicate_chunk(sequences: List[Seq], uniq_kmers: Set[str], min_length: int) -> List[Seq]:
+def deduplicate_chunk(sequences: List[Seq], uniq_kmers: Set[str], k: int) -> List[Seq]:
     local_uniq_seqs = {}
     local_uniq_kmers = set()
 
     for sequence in sequences:
-        kmer_hashes = set(hash_string(kmer) for kmer in generate_kmers(sequence.sequence, min_length))
+        kmer_hashes = set(hash_string(kmer) for kmer in generate_kmers(sequence.sequence, k))
         if all(kmer_hash in uniq_kmers or kmer_hash in local_uniq_kmers for kmer_hash in kmer_hashes):
             continue
         local_uniq_seqs[hash_string(sequence.sequence)] = sequence
