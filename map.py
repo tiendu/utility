@@ -65,7 +65,7 @@ def read_sequences(file_path: Path) -> List[Seq]:
 
     return sequences
 
-def reverse_complement(dna):
+def reverse_complement(dna: str) -> str:
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
 
     return dna[::-1].translate(complement)
