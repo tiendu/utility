@@ -22,23 +22,19 @@ class Seq:
     id: str
     sequence: str
     quality: str = ''
-    
     def __post_init__(self):
         object.__setattr__(self, 'sequence', self.sequence.upper())
 
 def read_sequences(file_path: Path) -> List[Seq]:
     sequences = []
     file_type = None
-
     if any(file_path.suffix in ext for ext in FASTQ_EXTENSIONS):
         file_type = 'FASTQ'
     elif any(file_path.suffix in ext for ext in FASTA_EXTENSIONS):
         file_type = 'FASTA'
     else:
         raise ValueError(f'Unrecognized file extension for {file_path}. Expected FASTA {FASTA_EXTENSIONS} or FASTQ {FASTQ_EXTENSIONS}')
-
     opener = gzip.open if file_path.suffix == '.gz' else open
-
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
             while True:
@@ -62,12 +58,10 @@ def read_sequences(file_path: Path) -> List[Seq]:
                     seq.append(line.upper())
             if seq_id:
                 sequences.append(Seq(seq_id, ''.join(seq)))
-
     return sequences
 
 def reverse_complement(dna: str) -> str:
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
-
     return dna[::-1].translate(complement)
 
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
@@ -84,10 +78,8 @@ def cosine_similarity(query_kmers: list[str], reference_kmers: list[str]) -> flo
     dot_product = sum(query_kmers[kmer] * reference_kmers[kmer] for kmer in intersection)
     norm_query = sqrt(sum(count**2 for count in query_kmers.values()))
     norm_reference = sqrt(sum(count**2 for count in reference_kmers.values()))
-    
     if norm_query == 0 or norm_reference == 0:
         return 0.0
-
     return dot_product / (norm_query * norm_reference)
 
 def euclidean_similarity(query_kmers: List[str], reference_kmers: List[str]) -> float:
@@ -97,13 +89,10 @@ def euclidean_similarity(query_kmers: List[str], reference_kmers: List[str]) -> 
     sum_of_squares = sum((query_kmers[kmer] - reference_kmers[kmer]) ** 2 for kmer in all_kmers)
     euclidean_dist = sqrt(sum_of_squares)
     max_possible_dist = sqrt(len(all_kmers))
-    
     if max_possible_dist == 0:
         return 0.0
-    
     norm_dist = euclidean_dist / max_possible_dist  # Normalize the distance to be in the range [0, 1]
     norm_similarity = 1 - norm_dist  # Convert to a similarity measure: similarity = 1 - normalized distance
-    
     return norm_similarity
 
 def map_query_to_reference(query: Seq, 
@@ -112,20 +101,19 @@ def map_query_to_reference(query: Seq,
                            coverage_threshold: float,
                            is_nucleotide: bool,
                            similarity_func=euclidean_similarity) -> List[Tuple[str, str, str, float, float, str]]:
+    if len(query.sequence) > len(reference.sequence):
+        query, reference = reference, query
     k = max(len(query.sequence) // 5 | 1, 3)
     query_kmers = list(generate_hashed_kmers(query.sequence, k))
     results = []
-
     for i in range(len(reference.sequence) - len(query.sequence) + 1):
         subref = reference.sequence[i:i + len(query.sequence)]
         subref_kmers = list(generate_hashed_kmers(subref, k))
-
         if is_nucleotide:
             rev_complement_seq = reverse_complement(subref)
             rev_complement_kmers = list(generate_hashed_kmers(rev_complement_seq, k))
             fwd_similarity = similarity_func(query_kmers, subref_kmers)
             rev_similarity = similarity_func(query_kmers, rev_complement_kmers)
-
             if fwd_similarity > rev_similarity:
                 best_similarity = fwd_similarity
                 strand = '+'
@@ -135,12 +123,9 @@ def map_query_to_reference(query: Seq,
         else:  # Amino acid mode: only forward strand
             best_similarity = similarity_func(query_kmers, subref_kmers)
             strand = '+'  # No reverse complement for amino acids
-
         coverage = len(subref) / len(reference.sequence)
-
         if best_similarity >= similarity_threshold and coverage >= coverage_threshold:
             results.append((query.id, reference.id, f'{i}..{i+len(query.sequence)}', round(best_similarity, 3), round(coverage, 3), strand))
-
     return results
 
 def process_concurrently(query_sequences: List[Seq], 
@@ -149,21 +134,25 @@ def process_concurrently(query_sequences: List[Seq],
                          coverage_threshold: float, 
                          is_nucleotide: bool,
                          output_file: str,
-                         threads: int) -> None:
+                         threads: int,
+                         method: str) -> None:
     results = []
-
+    if method == 'euclid':
+        similarity_func = euclidean_similarity
+    elif method == 'cosine':
+        similarity_func = cosine_similarity
     max_workers = threads or 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         func = partial(map_query_to_reference, 
                        similarity_threshold=similarity_threshold, 
                        coverage_threshold=coverage_threshold, 
-                       is_nucleotide=is_nucleotide)
+                       is_nucleotide=is_nucleotide,
+                       similarity_func=similarity_func)
         futures = [executor.submit(func, query, reference) for query, reference in product(query_sequences, reference_sequences)]
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
             if result:
                 results.extend(result)
-
     if results:
         headers = ['Query_ID', 'Reference_ID', 'Region', 'Similarity', 'Coverage', 'Strand']
         with open(output_file, 'w', newline='') as csvfile:
@@ -181,19 +170,15 @@ def main():
     parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
     parser.add_argument('--mode', choices=['nu', 'aa'], default='nu', 
                         help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
-    
+    parser.add_argument('--method', choices=['euclid', 'cosine'], default='euclid', help='Method for calculating similarity')
     args = parser.parse_args()
-
     query_sequences = read_sequences(Path(args.query))
     reference_sequences = read_sequences(Path(args.reference))
-
     if not query_sequences or not reference_sequences:
         print('Error: One or both input files are empty.')
         sys.exit(1)
-
     is_nucleotide = args.mode == 'nu'
-    
-    process_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, is_nucleotide, args.output, args.threads)
+    process_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, is_nucleotide, args.output, args.threads, args.method)
 
 if __name__ == '__main__':
     main()
