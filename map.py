@@ -170,7 +170,7 @@ def main():
     parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
     parser.add_argument('--mode', choices=['nu', 'aa'], default='nu', 
                         help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
-    parser.add_argument('--method', choices=['euclid', 'cosine'], default='euclid', help='Method for calculating similarity')
+    parser.add_argument('--method', choices=['euclid', 'cosine'], default='cosine', help='Method for calculating similarity')
     args = parser.parse_args()
     query_sequences = read_sequences(Path(args.query))
     reference_sequences = read_sequences(Path(args.reference))
