@@ -95,6 +95,22 @@ def euclidean_similarity(query_kmers: List[str], reference_kmers: List[str]) -> 
     norm_similarity = 1 - norm_dist  # Convert to a similarity measure: similarity = 1 - normalized distance
     return norm_similarity
 
+def truncate_string(string: str, width: int) -> str:
+    return string if len(string) <= width else string[:width - 3] + '...'
+
+def print_stdout_table(headers: List[str], rows: List[List[str]], col_widths: dict):
+    def format_cell(value: str, width: int) -> str:
+        truncated = value if len(value) <= width else value[:width - 3] + '...'
+        return truncated.ljust(width)  # Left-justify to ensure even spacing
+
+    header_row = " | ".join([format_cell(header, col_widths[header]) for header in headers])
+    print(f"| {header_row} |")
+    divider_row = "-" * (sum(col_widths.values()) + 3 * (len(headers) - 1) + 2)
+    print(divider_row)
+    for row in rows:
+        formatted_row = " | ".join([format_cell(str(value), col_widths[header]) for value, header in zip(row, headers)])
+        print(f"| {formatted_row} |")
+
 def map_query_to_reference(query: Seq, 
                            reference: Seq, 
                            similarity_threshold: float, 
@@ -103,7 +119,7 @@ def map_query_to_reference(query: Seq,
                            similarity_func=euclidean_similarity) -> List[Tuple[str, str, str, float, float, str]]:
     if len(query.sequence) > len(reference.sequence):
         query, reference = reference, query
-    k = max(len(query.sequence) // 5 | 1, 3)
+    k = max(len(query.sequence) // 7 | 1, 3)
     query_kmers = list(generate_hashed_kmers(query.sequence, k))
     results = []
     for i in range(len(reference.sequence) - len(query.sequence) + 1):
@@ -153,8 +169,17 @@ def process_concurrently(query_sequences: List[Seq],
             result = future.result()
             if result:
                 results.extend(result)
+    headers = ['Query_ID', 'Reference_ID', 'Region', 'Similarity', 'Coverage', 'Strand']
+    col_widths = {
+        'Query_ID': 20,
+        'Reference_ID': 20,
+        'Region': 15,
+        'Similarity': 10,
+        'Coverage': 10,
+        'Strand': 5
+    }
     if results:
-        headers = ['Query_ID', 'Reference_ID', 'Region', 'Similarity', 'Coverage', 'Strand']
+        print_stdout_table(headers, results, col_widths)
         with open(output_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(headers)
@@ -166,7 +191,7 @@ def main():
     parser.add_argument('--reference', required=True, help='Path to the reference input file')
     parser.add_argument('-s', '--similarity', type=float, default=0.8, help='Similarity threshold for sequence matching (default: 0.8)')
     parser.add_argument('-c', '--coverage', type=float, default=0.0, help='Coverage threshold for sequence matching (default: 0.0)')
-    parser.add_argument('-t', '--threads', type=int, help='Number of threads')
+    parser.add_argument('-t', '--threads', type=int, default=4, help='Number of threads')
     parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
     parser.add_argument('--mode', choices=['nu', 'aa'], default='nu', 
                         help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
