@@ -127,7 +127,10 @@ def map_query_to_reference(query: Seq,
                            similarity_threshold: float, 
                            coverage_threshold: float,
                            is_nucleotide: bool,
+                           is_circular: bool=False,
                            similarity_func=euclidean_similarity) -> list[set[str, str, str, float, float, str]]:
+    if is_circular:
+        query.sequence = query.sequence + query.sequence[:len(query.sequence)-1]  # Simulate circularity
     if len(query.sequence) > len(reference.sequence):
         query, reference = reference, query
     k = max(len(query.sequence) // 5 | 1, 3)
@@ -157,7 +160,10 @@ def map_query_to_reference(query: Seq,
 
 def quick_scan(query_sequences: list[Seq],
                reference_index: dict,
+               is_circular: bool=False,
                k: int=11) -> set[Seq]:
+    if is_circular:
+        query.sequence = query.sequence + query.sequence[:len(query.sequence)-1]  # Simulate circularity
     reference_sequences = set()
     for query_sequence in query_sequences:
         query_kmers = set(kmerize(query_sequence.sequence, k))
@@ -201,6 +207,7 @@ def map_concurrently(query_sequences: list[Seq],
                        similarity_threshold=similarity_threshold, 
                        coverage_threshold=coverage_threshold, 
                        is_nucleotide=is_nucleotide,
+                       is_circular=True.
                        similarity_func=similarity_func)
         futures = [executor.submit(func, query, reference) for query, reference in product(query_sequences, reference_sequences)]
         for future in concurrent.futures.as_completed(futures):
@@ -280,7 +287,7 @@ def main():
         print('Error: One or both input files are empty.')
         sys.exit(1)
     reference_index = OrderedDict(sorted(reference_index.items(), key=lambda item: len(item[1])))
-    reference_sequences = quick_scan(query_sequences, reference_index)
+    reference_sequences = quick_scan(query_sequences, reference_index, is_circular=True)
     is_nucleotide = args.mode == 'nu'
     map_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, is_nucleotide, args.output, args.threads, args.method)
 
