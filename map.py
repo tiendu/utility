@@ -1,3 +1,4 @@
+
 import hashlib
 import json
 from collections import defaultdict, Counter, OrderedDict
@@ -126,48 +127,71 @@ def map_query_to_reference(query: Seq,
                            reference: Seq, 
                            similarity_threshold: float, 
                            coverage_threshold: float,
+                           similarity_func,
                            is_nucleotide: bool,
-                           is_circular: bool=False,
-                           similarity_func=euclidean_similarity) -> list[set[str, str, str, float, float, str]]:
-    if is_circular:
-        query.sequence = query.sequence + query.sequence[:len(query.sequence)-1]  # Simulate circularity
+                           is_circular: bool=False) -> list[set[str, str, str, float, float, str]]:
     if len(query.sequence) > len(reference.sequence):
         query, reference = reference, query
+    query1 = query.sequence
+    query2 = ''
+    if is_circular:
+        split_point = len(query.sequence) // 2
+        query2 = query.sequence[split_point:] + query.sequence[:split_point]  # Simulate circularity
+    else:
+        query2 = ''
     k = max(len(query.sequence) // 5 | 1, 3)
-    query_kmers = list(kmerize(query.sequence, k))
+    kmers1 = set(kmerize(query1, k))
+    kmers2 = set(kmerize(query2, k)) if query2 else set()
+    kmers = kmers1.union(kmers2)
     results = []
-    for i in range(len(reference.sequence) - len(query.sequence) + 1):
-        subref = reference.sequence[i:i + len(query.sequence)]
-        subref_kmers = list(kmerize(subref, k))
+    for i in range(abs(len(reference.sequence) - len(query.sequence) + 1)):
+        fw_seq = reference.sequence[i:i + len(query.sequence)]
+        fw_kmers = set(kmerize(fw_seq, k))
         if is_nucleotide:
-            rev_complement_seq = reverse_complement(subref)
-            rev_complement_kmers = list(kmerize(rev_complement_seq, k))
-            fwd_similarity = similarity_func(query_kmers, subref_kmers)
-            rev_similarity = similarity_func(query_kmers, rev_complement_kmers)
-            if fwd_similarity > rev_similarity:
-                best_similarity = fwd_similarity
+            rc_seq = reverse_complement(fw_seq)
+            rc_kmers = set(kmerize(rc_seq, k))
+            fw_similarity = similarity_func(kmers, fw_kmers)
+            rv_similarity = similarity_func(kmers, rc_kmers)
+            if fw_similarity > rv_similarity:
+                best_similarity = fw_similarity
                 strand = '+'
             else:
-                best_similarity = rev_similarity
+                best_similarity = rv_similarity
                 strand = '-'
         else:  # Amino acid mode: only forward strand
-            best_similarity = similarity_func(query_kmers, subref_kmers)
-            strand = '+'  # No reverse complement for amino acids
-        coverage = len(subref) / len(reference.sequence)
+            best_similarity = similarity_func(kmers, fw_kmers)
+            strand = '+'
+        coverage = len(fw_seq) / len(reference.sequence)
         if best_similarity >= similarity_threshold and coverage >= coverage_threshold:
-            results.append((query.id, reference.id, f'{i}..{i+len(query.sequence)}', round(best_similarity, 3), round(coverage, 3), strand))
+            match_start = i
+            match_end = i + len(query.sequence)
+            if is_circular:
+                # Handle wrap-around when match extends beyond the end of the reference
+                if match_end > len(reference.sequence):
+                    match_end = match_end % len(reference.sequence)
+                    position = f'{match_start_adj}..{match_end_adj} (circular)'
+                else:
+                    position = f'{match_start}..{match_end}'
+            else:
+                position = f'{match_start}..{match_end}'
+            results.append((query.id, reference.id, position, round(best_similarity, 3), round(coverage, 3), strand))
     return results
 
 def quick_scan(query_sequences: list[Seq],
                reference_index: dict,
                is_circular: bool=False,
                k: int=11) -> set[Seq]:
-    if is_circular:
-        query.sequence = query.sequence + query.sequence[:len(query.sequence)-1]  # Simulate circularity
     reference_sequences = set()
     for query_sequence in query_sequences:
-        query_kmers = set(kmerize(query_sequence.sequence, k))
-        for kmer in query_kmers:
+        if is_circular:
+            query1 = query_sequence.sequence + query_sequence.sequence[::-1]  # Simulate circularity
+            query2 = query_sequence.sequence[::-1] + query_sequence.sequence
+            kmers1 = set(kmerize(query1, k))
+            kmers2 = set(kmerize(query2, k))
+            kmers = kmers1.union(kmers2)
+        else:
+            kmers = set(kmerize(query_sequence.sequence, k))
+        for kmer in kmers:
             if kmer in reference_index:  # Ensure the kmer exists in the lookup table
                 if len(reference_index[kmer]) == 1:  # Unique entry
                     ref_entry = reference_index[kmer][0]
@@ -195,7 +219,8 @@ def map_concurrently(query_sequences: list[Seq],
                      is_nucleotide: bool,
                      output_file: str,
                      threads: int,
-                     method: str) -> None:
+                     method: str,
+                     is_circular: bool) -> None:
     results = []
     if method == 'euclid':
         similarity_func = euclidean_similarity
@@ -207,7 +232,7 @@ def map_concurrently(query_sequences: list[Seq],
                        similarity_threshold=similarity_threshold, 
                        coverage_threshold=coverage_threshold, 
                        is_nucleotide=is_nucleotide,
-                       is_circular=True.
+                       is_circular=is_circular,
                        similarity_func=similarity_func)
         futures = [executor.submit(func, query, reference) for query, reference in product(query_sequences, reference_sequences)]
         for future in concurrent.futures.as_completed(futures):
@@ -272,6 +297,8 @@ def main():
                         help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
     parser.add_argument('--method', choices=['euclid', 'cosine'], default='cosine', 
                         help='Method for calculating similarity')
+    parser.add_argument('--topology', choices=['linear', 'circular'], default='linear',
+                        help='Determine whether a sequence is linear/circular')
     args = parser.parse_args()
     query_sequences = read_sequences(Path(args.query))
     reference_path = Path(args.reference)
@@ -286,10 +313,14 @@ def main():
     if not query_sequences or not reference_path:
         print('Error: One or both input files are empty.')
         sys.exit(1)
+    is_circular = False if args.topology == 'linear' else True
+    is_nucleotide = True if args.mode == 'nu' else False
+    if not is_nucleotide and is_circular:
+        print("Error: Amino acid sequences don't have circular topology")
+        sys.exit(1)
     reference_index = OrderedDict(sorted(reference_index.items(), key=lambda item: len(item[1])))
-    reference_sequences = quick_scan(query_sequences, reference_index, is_circular=True)
-    is_nucleotide = args.mode == 'nu'
-    map_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, is_nucleotide, args.output, args.threads, args.method)
+    reference_sequences = quick_scan(query_sequences, reference_index, is_circular=is_circular)
+    map_concurrently(query_sequences, reference_sequences, args.similarity, args.coverage, is_nucleotide, args.output, args.threads, args.method, is_circular)
 
 if __name__ == '__main__':
     main()
