@@ -248,7 +248,8 @@ def map_concurrently(query_sequences: list[Seq],
         'Strand': 5
     }
     if results:
-        print_stdout_table(headers, results, col_widths)
+        results = sorted(results, key=lambda x: x[3], reverse=True)
+        print_stdout_table(headers, results[:10], col_widths)
         with open(output_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(headers)
