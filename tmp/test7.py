@@ -1,4 +1,5 @@
 import hashlib
+import re
 import json
 from collections import defaultdict, Counter, OrderedDict
 from dataclasses import dataclass
@@ -71,10 +72,10 @@ def read_sequences(file_path: Path) -> list[Seq]:
 def create_regex(sequence: str) -> str:
     ambiguous_nucleotide_patterns = {
         'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T',
-        'R': '[AGR]', 'Y': '[CTY]', 'S': '[GCS]', 'W': '[ATW]',
-        'K': '[GTK]', 'M': '[ACM]', 'B': '[CGTB]', 'D': '[AGTD]',
-        'H': '[ACTH]', 'V': '[ACGV]', 'N': '[ACGTN]'
-    }
+        'R': '[AGR]', 'Y': '[CTY]', 'S': '[GCS]', 'W': '[ATW]', 'K': '[GTK]', 'M': '[ACM]', 
+        'B': '[CGTBSKY]', 'D': '[AGTDRKW]', 'H': '[ACTHMYW]', 'V': '[ACGVMSR]', 
+        'N': '[ACGTNRYSWKMBDHV]'
+   }
     try:
         regex_pattern = ''.join(ambiguous_nucleotide_patterns[nu] for nu in sequence)
     except KeyError as e:
@@ -89,12 +90,14 @@ def reverse_complement(dna: str) -> str:
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
 
-def kmerize(string: str, k: int, modifier='') -> list[str]:
+def kmerize(string: str, k: int, modifier=None) -> list[str]:
+    kmers = []
     for i in range(len(string) - k + 1):
         if modifier:
-            yield modifier(string[i:i + k])
+            kmers.append(modifier(string[i:i + k]))
         else:
-            yield string[i:i + k]
+            kmers.append(string[i:i + k])
+    return kmers
 
 def cosine_similarity(query_kmers: list[str], reference_kmers: list[str]) -> float:
     query_kmers = Counter(query_kmers)
@@ -162,7 +165,7 @@ def quick_scan(query_sequences: list[Seq],
 def truncate_string(string: str, width: int) -> str:
     return string if len(string) <= width else string[:width - 3] + '...'
 
-def print_stdout_table(headers: list[str], rows: list[list[str]], col_widths: dict):
+def stdout_table(headers: list[str], rows: list[list[str]], col_widths: dict):
     def format_cell(value: str, width: int) -> str:
         truncated = value if len(value) <= width else value[:width - 3] + '...'
         return truncated.ljust(width)  # Left-justify to ensure even spacing
@@ -192,24 +195,23 @@ def map_query_to_reference(query: Seq,
     else:
         query2 = ''
     k = max(len(query.sequence) // 5 | 1, 3)
-    kmers1 = set(kmerize(query1, k))
-    kmers2 = set(kmerize(query2, k)) if query2 else set()
-    kmers = kmers1.union(kmers2)
+    kmers1 = kmerize(query1, k)
+    kmers2 = kmerize(query2, k) if query2 else list()
+    kmers = kmers1 + kmers2
     results = []
-    for i in range(abs(len(reference.sequence) - len(query.sequence) + 1)):
+    for i in range(len(reference.sequence) - len(query.sequence) + 1):
         fw_seq = reference.sequence[i:i + len(query.sequence)]
         if is_nucleotide:
             fw_kmers = kmerize(fw_seq, k, modifier=create_regex)
-            for i, (fw_kmer, kmer) in enumerate(product(fw_kmers, kmers)):
+            for j, (fw_kmer, kmer) in enumerate(product(fw_kmers, kmers)):
                 if bool(re.search(fw_kmer, kmer)):
-                    fw_kmers[i // len(kmers)] = kmer
-            fw_kmers = set(fw_kmers)
+                    fw_kmers[j // len(kmers)] = kmer
             rc_seq = reverse_complement(fw_seq)
             rc_kmers = kmerize(rc_seq, k, modifier=create_regex)
-            for i, (rc_kmer, kmer) in enumerate(product(rc_kmers, kmers)):
+            for j, (rc_kmer, kmer) in enumerate(product(rc_kmers, kmers)):
                 if bool(re.search(rc_kmer, kmer)):
-                    rc_kmers[i // len(kmers)] = kmer
-            rc_kmers = set(rc_kmers)
+                    rc_kmers[j // len(kmers)] = kmer
+            print(f'{kmers} ; {fw_kmers}')
             fw_similarity = similarity_func(kmers, fw_kmers)
             rv_similarity = similarity_func(kmers, rc_kmers)
             if fw_similarity > rv_similarity:
@@ -275,7 +277,7 @@ def map_concurrently(query_sequences: list[Seq],
     }
     if results:
         results = sorted(results, key=lambda x: x[3], reverse=True)
-        print_stdout_table(headers, results[:10], col_widths)
+        stdout_table(headers, results[:10], col_widths)
         with open(output_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(headers)
