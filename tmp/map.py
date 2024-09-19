@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import product
+from functools import partial
 from math import sqrt
 import csv
 import gzip
@@ -120,11 +121,40 @@ def stdout_table(headers: list[str], rows: list[list[str]], col_widths: dict):
 
     header_row = " | ".join([format_cell(header, col_widths[header]) for header in headers])
     print(f"| {header_row} |")
-    divider_row = "-" * (sum(cool_widths.values()) + 3 * (len(headers) - 1) + 2)
+    divider_row = "-" * (sum(col_widths.values()) + 3 * (len(headers) - 1) + 2)
     print(divider_row)
     for row in rows:
         formatted_row = " | ".join([format_cell(str(value), col_widths[header]) for value, header in zip(row, headers)])
         print(f"| {formatted_row} |")
+
+def short_to_sub_long(i: int,
+                      k: int,
+                      short: Seq,
+                      long: Seq,
+                      similarity_threshold: float,
+                      coverage_threshold: float,
+                      is_nucleotide: bool,
+                      is_circular: bool) -> set[str, str, str, float, float, str]:
+    if is_circular:
+        split_point = len(short.sequence) // 2
+        short.sequence = short.sequence[split_point:] + short.sequence[:split_point]  # Simulate circularity
+    fw_seq = long.sequence[i:i + len(short.sequence)]
+    fw_similarity = calculate_kmer_similarity(short.sequence, fw_seq, k)
+    if is_nucleotide:
+        rc_seq = reverse_complement(fw_seq)
+        rc_similarity = calculate_kmer_similarity(short.sequence, rc_seq, k)
+        similarity = max(fw_similarity, rc_similarity)
+        strand = '+' if fw_similarity >= rc_similarity else '-'
+    else:  # Amino acid mode: only forward strand
+        similarity = fw_similarity
+        strand = '.'
+    coverage = len(fw_seq) / len(long.sequence)
+    if coverage >= coverage_threshold and similarity >= similarity_threshold:
+        start = i
+        end = (i + len(short.sequence)) % len(long.sequence) if is_circular else i + len(short.sequence)
+        position = f'{start}..{end}' if not is_circular else f'{start}..{end} (circular)'
+        return short.id, long.id, position, round(similarity, 3), round(coverage, 3), strand
+    return None
 
 def map_short_to_long(short: Seq,
                       long: Seq,
@@ -135,35 +165,18 @@ def map_short_to_long(short: Seq,
                       num_threads: int=1) -> list[set[str, str, str, float, float, str]]:
     if len(short.sequence) > len(long.sequence):
         short, long = long, short 
-    short1 = short.sequence
-    if is_circular:
-        split_point = len(short.sequence) // 2
-        short2 = short.sequence[split_point:] + short.sequence[:split_point]  # Simulate circularity
-    else:
-        short2 = ''
     k = max(len(short.sequence) // 5 | 1, 3)
     results = []
-    def short_to_sub_long(i: int) -> set[str, str, str, float, float, str]:
-        fw_seq = long.sequence[i:i + len(short.sequence)]
-        fw_similarity = calculate_kmer_similarity(short.sequence, fw_seq, k)
-        print(f'{i}..{i + len(short.sequence)}')
-        if is_nucleotide:
-            rc_seq = reverse_complement(fw_seq)
-            rc_similarity = calculate_kmer_similarity(short.sequence, rc_seq, k)
-            similarity = max(fw_similarity, rc_similarity)
-            strand = '+' if fw_similarity >= rc_similarity else '-'
-        else:  # Amino acid mode: only forward strand
-            similarity = fw_similarity
-            strand = '.'
-        coverage = len(fw_seq) / len(long.sequence)
-        if coverage >= coverage_threshold and similarity >= similarity_threshold:
-            start = i
-            end = (i + len(short.sequence)) % len(long.sequence) if is_circular else i + len(short.sequence)
-            position = f'{start}..{end}' if not is_circular else f'{start}..{end} (circular)'
-            return short.id, long.id, position, round(similarity, 3), round(coverage, 3), strand
-        return None
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(short_to_sub_long, i)
+        func = partial(short_to_sub_long,
+                       k=k,
+                       short=short,
+                       long=long,
+                       similarity_threshold=similarity_threshold,
+                       coverage_threshold=coverage_threshold,
+                       is_nucleotide=is_nucleotide,
+                       is_circular=is_circular)
+        futures = [executor.submit(func, i)
                    for i in range(len(long.sequence) - len(short.sequence) + 1)]
         for future in as_completed(futures):
             result = future.result()
