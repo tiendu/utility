@@ -52,10 +52,11 @@ def calculate_kmer_similarity(seq1: str, seq2: str, k: int):
     return similarity
 
 # Find the best match location for the shorter sequence in the longer sequence
-def map_sequences(long_seq: str, short_seq: str, k: int):
+def map_sequences(long_seq: str, short_seq: str, k: int=3):
     # Ensure the shorter sequence is the second one
     if len(long_seq) < len(short_seq):
         long_seq, short_seq = short_seq, long_seq
+    k = max(len(short_seq) // 5, k)
     best_similarity = 0
     best_position = -1
     best_coverage = len(short_seq) / len(long_seq)
@@ -73,12 +74,9 @@ def map_sequences(long_seq: str, short_seq: str, k: int):
 
 # Example sequences
 sequence_1 = "tangccatggcta"
-sequence_2 = "aygca"
-
+sequence_2 = "aygcans"
 # Run the mapping and calculate similarity, best position, and coverage
-k = 2
-position, similarity, coverage = map_sequences(sequence_1, sequence_2, k)
-
+position, similarity, coverage = map_sequences(sequence_1, sequence_2)
 print(f"Best match position: {position}")
 print(f"Similarity score: {similarity}")
 print(f"Coverage: {coverage}")
