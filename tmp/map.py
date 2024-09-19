@@ -88,6 +88,8 @@ def reverse_complement(dna: str) -> str:
     return dna[::-1].translate(complement)
 
 def kmerize(string: str, k: int, modifier=None) -> list[str]:
+    if len(string) < k:
+        return []
     if modifier:
         return [modifier(string[i:i+k]) for i in range(len(string) - k + 1)]
     else:
@@ -97,6 +99,8 @@ def compare_kmer_sets(kmers1: set, kmers2: set) -> int:
     def compare_kmers(kmer_bits1: set, kmer_bits2: set):
         return all(bit1 & bit2 for bit1, bit2 in zip(kmer_bits1, kmer_bits2))
 
+    if not kmers1 or not kmers2:
+        return 0
     total_matches = 0
     for kmer_bits1 in kmers1:
         best_match = max(compare_kmers(kmer_bits1, kmer_bits2) for kmer_bits2 in kmers2)
@@ -131,29 +135,42 @@ def short_to_sub_long(i: int,
                       k: int,
                       short: Seq,
                       long: Seq,
-                      similarity_threshold: float,
-                      coverage_threshold: float,
+                      sim_thresh: float,
+                      cov_thresh: float,
                       is_nucleotide: bool,
                       is_circular: bool) -> set[str, str, str, float, float, str]:
-    if is_circular:
-        split_point = len(short.sequence) // 2
-        short.sequence = short.sequence[split_point:] + short.sequence[:split_point]  # Simulate circularity
-    fw_seq = long.sequence[i:i + len(short.sequence)]
-    fw_similarity = calculate_kmer_similarity(short.sequence, fw_seq, k)
+    fw_match = long.sequence[i:i + len(short.sequence)]
+    fw_sim = calculate_kmer_similarity(short.sequence, fw_match, k)
     if is_nucleotide:
-        rc_seq = reverse_complement(fw_seq)
-        rc_similarity = calculate_kmer_similarity(short.sequence, rc_seq, k)
-        similarity = max(fw_similarity, rc_similarity)
-        strand = '+' if fw_similarity >= rc_similarity else '-'
-    else:  # Amino acid mode: only forward strand
-        similarity = fw_similarity
+        rc_match = reverse_complement(fw_match)
+        rc_sim = calculate_kmer_similarity(short.sequence, rc_match, k)
+        best_sim = max(fw_sim, rc_sim)
+        strand = '+' if fw_sim >= rc_sim else '-'
+    else:
+        best_sim = fw_sim
         strand = '.'
-    coverage = len(fw_seq) / len(long.sequence)
-    if coverage >= coverage_threshold and similarity >= similarity_threshold:
-        start = i
+    if is_circular:
+        circular_long = long.sequence + long.sequence
+        fw_match_circ = circular_long[i:i + len(short.sequence)]
+        fw_sim_circ = calculate_kmer_similarity(short.sequence, fw_match_circ, k)
+        rc_match_circ = reverse_complement(fw_match_circ)
+        rc_sim_circ = calculate_kmer_similarity(short.sequence, rc_match_circ, k)
+        best_sim_circ = max(fw_sim_circ, rc_sim_circ)
+        strand_circ = '+' if fw_sim_circ >= rc_sim_circ else '-'
+        if best_sim_circ > best_sim:
+            best_sim = best_sim_circ
+            strand = strand_circ
+            match_type = 'circular'
+        else:
+            match_type = 'linear'
+    else:
+        match_type = 'linear'
+    coverage = len(fw_match) / len(long.sequence)
+    if coverage >= cov_thresh and best_sim >= sim_thresh:
+        start = i + 1
         end = (i + len(short.sequence)) % len(long.sequence) if is_circular else i + len(short.sequence)
-        position = f'{start}..{end}' if not is_circular else f'{start}..{end} (circular)'
-        return short.id, long.id, position, round(similarity, 3), round(coverage, 3), strand
+        position = f'{start}..{end}' if match_type == 'linear' else f'{start}..{end} (circular)'
+        return short.id, long.id, position, round(best_sim, 3), round(coverage, 3), strand
     return None
 
 def map_short_to_long(short: Seq,
@@ -172,12 +189,16 @@ def map_short_to_long(short: Seq,
                        k=k,
                        short=short,
                        long=long,
-                       similarity_threshold=similarity_threshold,
-                       coverage_threshold=coverage_threshold,
+                       sim_thresh=similarity_threshold,
+                       cov_thresh=coverage_threshold,
                        is_nucleotide=is_nucleotide,
                        is_circular=is_circular)
-        futures = [executor.submit(func, i)
-                   for i in range(len(long.sequence) - len(short.sequence) + 1)]
+        if not is_circular:
+            futures = [executor.submit(func, i) 
+                       for i in range(len(long.sequence) - len(short.sequence) + 1)]
+        else:
+            futures = [executor.submit(func, i)
+                       for i in range((len(long.sequence) - len(short.sequence) + 1) * 2)]
         for future in as_completed(futures):
             result = future.result()
             if result:
