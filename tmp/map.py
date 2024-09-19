@@ -138,25 +138,24 @@ def short_to_sub_long(i: int,
                       sim_thresh: float,
                       cov_thresh: float,
                       is_nucleotide: bool,
-                      is_circular: bool) -> set[str, str, str, float, float, str]:
+                      is_circular: bool) -> tuple[str, str, str, float, float, str] | None:
+    def get_similarity_and_strand(fw_match: str, rc_match: str = '') -> tuple[float, str]:
+        if is_nucleotide:
+            rc_sim = calculate_kmer_similarity(short.sequence, rc_match, k)
+            fw_sim = calculate_kmer_similarity(short.sequence, fw_match, k)
+            if fw_sim >= rc_sim:
+                return fw_sim, '+'
+            return rc_sim, '-'
+        return calculate_kmer_similarity(short.sequence, fw_match, k), '.'
+
     fw_match = long.sequence[i:i + len(short.sequence)]
-    fw_sim = calculate_kmer_similarity(short.sequence, fw_match, k)
-    if is_nucleotide:
-        rc_match = reverse_complement(fw_match)
-        rc_sim = calculate_kmer_similarity(short.sequence, rc_match, k)
-        best_sim = max(fw_sim, rc_sim)
-        strand = '+' if fw_sim >= rc_sim else '-'
-    else:
-        best_sim = fw_sim
-        strand = '.'
+    rc_match = reverse_complement(fw_match) if is_nucleotide else ''
+    best_sim, strand = get_similarity_and_strand(fw_match, rc_match)
     if is_circular:
         circular_long = long.sequence + long.sequence
         fw_match_circ = circular_long[i:i + len(short.sequence)]
-        fw_sim_circ = calculate_kmer_similarity(short.sequence, fw_match_circ, k)
-        rc_match_circ = reverse_complement(fw_match_circ)
-        rc_sim_circ = calculate_kmer_similarity(short.sequence, rc_match_circ, k)
-        best_sim_circ = max(fw_sim_circ, rc_sim_circ)
-        strand_circ = '+' if fw_sim_circ >= rc_sim_circ else '-'
+        rc_match_circ = reverse_complement(fw_match_circ) if is_nucleotide else ''
+        best_sim_circ, strand_circ = get_similarity_and_strand(fw_match_circ, rc_match_circ)
         if best_sim_circ > best_sim:
             best_sim = best_sim_circ
             strand = strand_circ
@@ -179,30 +178,27 @@ def map_short_to_long(short: Seq,
                       coverage_threshold: float,
                       is_nucleotide: bool,
                       is_circular: bool=False,
-                      num_threads: int=1) -> list[set[str, str, str, float, float, str]]:
+                      num_threads: int=1) -> list[tuple[str, str, str, float, float, str]]:
     if len(short.sequence) > len(long.sequence):
         short, long = long, short 
     k = max(len(short.sequence) // 5 | 1, 3)
     results = []
+    indices = range(len(long.sequence) - len(short.sequence) + 1)
+    if is_circular:
+        indices = range((len(long.sequence) - len(short.sequence) + 1) * 2)
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        func = partial(short_to_sub_long,
-                       k=k,
-                       short=short,
-                       long=long,
-                       sim_thresh=similarity_threshold,
-                       cov_thresh=coverage_threshold,
-                       is_nucleotide=is_nucleotide,
-                       is_circular=is_circular)
-        if not is_circular:
-            futures = [executor.submit(func, i) 
-                       for i in range(len(long.sequence) - len(short.sequence) + 1)]
-        else:
-            futures = [executor.submit(func, i)
-                       for i in range((len(long.sequence) - len(short.sequence) + 1) * 2)]
+        func = partial(short_to_sub_long, k=k,
+                       short=short, long=long,
+                       sim_thresh=similarity_threshold, cov_thresh=coverage_threshold,
+                       is_nucleotide=is_nucleotide, is_circular=is_circular)
+        
+        futures = [executor.submit(func, i) for i in indices]
+        
         for future in as_completed(futures):
             result = future.result()
             if result:
                 results.append(result)
+                
     return results
 
 def map_sequences(query_sequences: list[Seq],
