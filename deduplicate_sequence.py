@@ -64,6 +64,8 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
                 f.write(f'@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n')
 
 def kmerize(string: str, k: int, modifier=None) -> list[str]:
+    if len(string) < k:
+        return []
     if modifier:
         return [modifier(string[i:i+k]) for i in range(len(string) - k + 1)]
     return [string[i:i+k] for i in range(len(string) - k + 1)]
