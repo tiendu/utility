@@ -106,7 +106,11 @@ def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
             return True
     return False
 
-def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key: Callable[[Any], Any], is_descending: bool) -> List[List[Any]]:
+def round_robin_divide(items: List[Any], 
+                       chunk_size: int, 
+                       num_threads: int, 
+                       key: Callable[[Any], Any], 
+                       is_descending: bool) -> List[List[Any]]:
     def is_sorted(lst: List[Any], comparison_func: Callable[[Any, Any], bool]) -> bool:
         return all(comparison_func(lst[i], lst[i + 1]) for i in range(len(lst) - 1))
     
