@@ -110,18 +110,6 @@ def compare_kmer_sets(kmers1: set, kmers2: set) -> int:
             total_matches += 1
     return total_matches
 
-# def compare_kmer_sets(kmers1: set, kmers2: set) -> int:
-#     def compare_kmers(kmer_bits1: set, kmer_bits2: set):
-#         return all(bit1 & bit2 for bit1, bit2 in zip(kmer_bits1, kmer_bits2))
-
-#     if not kmers1 or not kmers2:
-#         return 0
-#     total_matches = 0
-#     for kmer_bits1 in kmers1:
-#         best_match = max(compare_kmers(kmer_bits1, kmer_bits2) for kmer_bits2 in kmers2)
-#         total_matches += best_match
-#     return total_matches
-
 def calculate_kmer_similarity(seq1: str, seq2: str, k: int) -> float:
     kmers1_bits = kmerize(seq1, k, sequence_to_bits)
     kmers2_bits = kmerize(seq2, k, sequence_to_bits)
