@@ -24,7 +24,6 @@ class Seq:
     id: str
     sequence: str
     quality: str = ''
-
     def __hash__(self) -> int:
         return hash((self.id, self.sequence, self.quality))
 
@@ -66,12 +65,53 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
             else:
                 f.write(f'@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n')
 
-def generate_kmers(string: str, k: int) -> Generator[str, None, None]:
-    for i in range(len(string) - k + 1):
-        yield string[i:i+k]
+def kmerize(string: str, k: int, modifier=None) -> list[str]:
+    if modifier:
+        return [modifier(string[i:i+k]) for i in range(len(string) - k + 1)]
+    return [string[i:i+k] for i in range(len(string) - k + 1)]
 
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
+
+def sequence_to_bits(dna: str) -> list:
+    nucl_to_bits = {
+        'A': 0b0001,  # A = 1
+        'T': 0b0010,  # T = 2
+        'G': 0b0100,  # G = 4
+        'C': 0b1000,  # C = 8
+        'W': 0b0011,  # W = A | T = 3
+        'R': 0b0101,  # R = A | G = 5
+        'Y': 0b1010,  # Y = C | T = 10
+        'S': 0b1100,  # S = G | C = 12
+        'K': 0b0110,  # K = G | T = 6
+        'M': 0b1001,  # M = A | C = 9
+        'B': 0b1110,  # B = C | G | T = 14
+        'D': 0b0111,  # D = A | G | T = 7
+        'H': 0b1011,  # H = A | C | T = 11
+        'V': 0b1101,  # V = A | C | G = 13
+        'N': 0b1111   # N = A | C | G | T = 15 (any nucleotide)
+    }
+
+    return [nucl_to_bits[nu.upper()] for nu in dna]
+
+def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
+    if not k:
+        k = len(str1) if len(str1) < len(str2) else len(str2)
+
+    bits1 = kmerize(str1, k, sequence_to_bits)
+    bits2 = kmerize(str2, k, sequence_to_bits)
+
+    def compare_bit_sets(set1: list, set2: list) -> bool:
+        return all(bit1 & bit2 for bit1, bit2 in zip(set1, set2))
+
+    if not bits1 or not bits2:
+        return False  # Return False for consistency in boolean values
+
+    for bit1 in bits1:
+        if any(compare_bit_sets(bit1, bit2) for bit2 in bits2):
+            return True
+
+    return False
 
 def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key: Callable[[Any], Any], is_descending: bool) -> List[List[Any]]:
     def is_sorted(lst: List[Any], comparison_func: Callable[[Any, Any], bool]) -> bool:
@@ -98,18 +138,20 @@ def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key:
 
     return divided_chunks
 
-def deduplicate_chunk(sequences: List[Seq], uniq_kmers: Set[str], k: int) -> List[Seq]:
+def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int) -> List[str]:
     local_uniq_seqs = {}
     local_uniq_kmers = set()
 
-    for sequence in sequences:
-        kmer_hashes = set(hash_string(kmer) for kmer in generate_kmers(sequence.sequence, k))
+    for seq in sequences:
+        kmer_hashes = set(hashed_kmer for hashed_kmer in kmerize(seq.sequence, k, hash_string))
 
+        # Use bitwise comparison for k-mers
         if all(kmer_hash in uniq_kmers or kmer_hash in local_uniq_kmers for kmer_hash in kmer_hashes):
             continue
 
-        local_uniq_seqs[hash_string(sequence.sequence)] = sequence
-        local_uniq_kmers.update(kmer_hashes)
+        if not any(compare_two_strings(seq.sequence, unique_seq.sequence, k) for unique_seq in local_uniq_seqs.values()):
+            local_uniq_seqs[hash_string(seq.sequence)] = seq
+            local_uniq_kmers.update(kmer_hashes)
 
     uniq_kmers.update(local_uniq_kmers)
 
