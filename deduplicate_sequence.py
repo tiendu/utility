@@ -33,7 +33,6 @@ class Seq:
 def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
     sequences = []
     opener = gzip.open if file_path.endswith('.gz') else open
-
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
@@ -55,7 +54,6 @@ def read_sequences_from_file(file_path: str, file_type: str) -> List[Seq]:
 
 def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
     opener = gzip.open if file_path.endswith('.gz') else open
-
     with opener(file_path, 'wt') as f:
         for seq in sequences:
             if seq.quality == '':
@@ -91,60 +89,47 @@ def sequence_to_bits(dna: str) -> list:
         'V': 0b1101,  # V = A | C | G = 13
         'N': 0b1111   # N = A | C | G | T = 15 (any nucleotide)
     }
-
     return [nucl_to_bits[nu.upper()] for nu in dna]
 
 def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
     if not k:
         k = len(str1) if len(str1) < len(str2) else len(str2)
-
     bits1 = kmerize(str1, k, sequence_to_bits)
     bits2 = kmerize(str2, k, sequence_to_bits)
-
     def compare_bit_sets(set1: list, set2: list) -> bool:
         return all(bit1 & bit2 for bit1, bit2 in zip(set1, set2))
 
     if not bits1 or not bits2:
         return False  # Return False for consistency in boolean values
-
     for bit1 in bits1:
         if any(compare_bit_sets(bit1, bit2) for bit2 in bits2):
             return True
-
     return False
 
 def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key: Callable[[Any], Any], is_descending: bool) -> List[List[Any]]:
     def is_sorted(lst: List[Any], comparison_func: Callable[[Any, Any], bool]) -> bool:
         return all(comparison_func(lst[i], lst[i + 1]) for i in range(len(lst) - 1))
-
+    
     if is_descending:
         order = lambda x, y: x >= y
     else:
         order = lambda x, y: x <= y
-
     if not is_sorted([key(item) for item in items], order):
         items = sorted(items, key=key, reverse=is_descending)
-
     chunks = [[] for _ in range(num_threads)]
-
     for i, item in enumerate(items):
         chunks[i % num_threads].append(item)
-
     divided_chunks = []
-
     for chunk in chunks:
         for i in range(0, len(chunk), chunk_size):
             divided_chunks.append(chunk[i:i + chunk_size])
-
     return divided_chunks
 
 def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int, mode: str) -> List[str]:
     local_uniq_seqs = {}
     local_uniq_kmers = set()
-
     for seq in sequences:
         kmer_hashes = set(hashed_kmer for hashed_kmer in kmerize(seq.sequence, k, hash_string))
-
         # Use bitwise comparison for k-mers
         if all(kmer_hash in uniq_kmers or kmer_hash in local_uniq_kmers for kmer_hash in kmer_hashes):
             continue
@@ -155,19 +140,16 @@ def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int, mode: 
         elif mode == 'aa':
             local_uniq_seqs[hash_string(seq.sequence)] = seq
             local_uniq_kmers.update(kmer_hashes)
-
     uniq_kmers.update(local_uniq_kmers)
-
     return list(local_uniq_seqs.values())
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) -> List[Seq]:
     chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
-
     while sequences:
         logging.info(f'Current number of sequences: {len(sequences)}')
         shared_sequences: Set[Seq] = set()
         shared_kmers: Set[str] = set()
-        sequences = sorted(sequences, key=lambda sequence: sequence.length(), reverse=True)
+        sequences = sorted(sequences, key=lambda seq: seq.length(), reverse=True)
         min_length = sequences[-1].length()
         chunks = round_robin_divide(sequences, chunk_size, num_threads, key=lambda sequence: sequence.length(), is_descending=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -176,15 +158,11 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) 
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
                 shared_sequences.update(future.result())
-
         if len(shared_sequences) == len(sequences):
             break
-
         sequences = list(shared_sequences)
         random.shuffle(sequences)
-
     logging.info(f'Final number of sequences: {len(shared_sequences)}')
-    
     return list(shared_sequences)
 
 def main() -> None:
@@ -195,40 +173,30 @@ def main() -> None:
     parser.add_argument('-m', '--mode', choices=['nu', 'aa'], default='nu',
                         help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
     args = parser.parse_args()
-
     if not os.path.exists(args.input_file):
         raise ValueError(f'The input file "{args.input_file}" does not exist.')
-
     try:
         with open(args.output_file, 'w'):
             pass
     except Exception as e:
         raise ValueError(f'Error creating output file "{args.output_file}": {e}')
-
     file_type = ''
-
     if any(ext in args.input_file for ext in FASTQ_EXTENSIONS):
         file_type = 'FASTQ'
     elif any(ext in args.input_file for ext in FASTA_EXTENSIONS):
         file_type = 'FASTA'
     else:
         raise ValueError(f'Unrecognized file extension for {args.input_file}. Expected FASTA (.fasta, .fa, .fna) or FASTQ (.fastq, .fq).')
-
     max_threads = os.cpu_count()
-
     if args.num_threads < 1 or args.num_threads > max_threads:
         logging.warning(f'Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}')
         args.num_threads = min(max(args.num_threads, 1), max_threads)
-
     sequences = read_sequences_from_file(args.input_file, file_type)
-
     if not sequences:
         raise ValueError('No sequences detected!')
-
     if args.num_threads >= len(sequences) * 0.1:
         logging.warning(f'Number of sequences too low, thread count adjusted to 1')
         args.num_threads = 1
-
     deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads, args.mode)
     write_sequences_to_file(deduplicated_sequences, args.output_file)
 
