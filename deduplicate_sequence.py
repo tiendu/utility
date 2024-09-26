@@ -138,7 +138,7 @@ def round_robin_divide(items: List[Any], chunk_size: int, num_threads: int, key:
 
     return divided_chunks
 
-def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int) -> List[str]:
+def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int, mode: str) -> List[str]:
     local_uniq_seqs = {}
     local_uniq_kmers = set()
 
@@ -148,8 +148,11 @@ def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int) -> Lis
         # Use bitwise comparison for k-mers
         if all(kmer_hash in uniq_kmers or kmer_hash in local_uniq_kmers for kmer_hash in kmer_hashes):
             continue
-
-        if not any(compare_two_strings(seq.sequence, unique_seq.sequence, k) for unique_seq in local_uniq_seqs.values()):
+        if mode == 'nu':
+            if not any(compare_two_strings(seq.sequence, unique_seq.sequence, k) for unique_seq in local_uniq_seqs.values()):
+                local_uniq_seqs[hash_string(seq.sequence)] = seq
+                local_uniq_kmers.update(kmer_hashes)
+        elif mode == 'aa':
             local_uniq_seqs[hash_string(seq.sequence)] = seq
             local_uniq_kmers.update(kmer_hashes)
 
@@ -157,7 +160,7 @@ def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int) -> Lis
 
     return list(local_uniq_seqs.values())
 
-def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq]:
+def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) -> List[Seq]:
     chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
 
     while sequences:
@@ -168,7 +171,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int) -> List[Seq
         min_length = sequences[-1].length()
         chunks = round_robin_divide(sequences, chunk_size, num_threads, key=lambda sequence: sequence.length(), is_descending=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, uniq_kmers=shared_kmers, k=min_length)
+            func = partial(deduplicate_chunk, uniq_kmers=shared_kmers, k=min_length, mode=mode)
             futures = [executor.submit(func, chunk) for chunk in chunks]
             concurrent.futures.wait(futures)
             for future in concurrent.futures.as_completed(futures):
@@ -189,6 +192,8 @@ def main() -> None:
     parser.add_argument('-i', '--input_file', required=True, help='Path to the input file.')
     parser.add_argument('-o', '--output_file', required=True, help='Path to the output file.')
     parser.add_argument('-t', '--num_threads', type=int, default=4, help='Number of threads to use. Default is 4.')
+    parser.add_argument('-m', '--mode', choices=['nu', 'aa'], default='nu',
+                        help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
     args = parser.parse_args()
 
     if not os.path.exists(args.input_file):
@@ -224,7 +229,7 @@ def main() -> None:
         logging.warning(f'Number of sequences too low, thread count adjusted to 1')
         args.num_threads = 1
 
-    deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads)
+    deduplicated_sequences = deduplicate_concurrently(sequences, args.num_threads, args.mode)
     write_sequences_to_file(deduplicated_sequences, args.output_file)
 
 if __name__ == '__main__':
