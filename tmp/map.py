@@ -92,8 +92,7 @@ def kmerize(string: str, k: int, modifier=None) -> list[str]:
         return []
     if modifier:
         return [modifier(string[i:i+k]) for i in range(len(string) - k + 1)]
-    else:
-        return [string[i:i+k] for i in range(len(string) - k + 1)]
+    return [string[i:i+k] for i in range(len(string) - k + 1)]
 
 def compare_kmer_sets(kmers1: set, kmers2: set) -> int:
     def compare_kmers(kmer_bits1: set, kmer_bits2: set):
