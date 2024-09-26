@@ -92,8 +92,7 @@ def sequence_to_bits(dna: str) -> list:
     return [nucl_to_bits[nu.upper()] for nu in dna]
 
 def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
-    if not k:
-        k = len(str1) if len(str1) < len(str2) else len(str2)
+    k = k or min(len(str1), len(str2))
     bits1 = kmerize(str1, k, sequence_to_bits)
     bits2 = kmerize(str2, k, sequence_to_bits)
     def compare_bit_sets(set1: list, set2: list) -> bool:
@@ -101,10 +100,7 @@ def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
 
     if not bits1 or not bits2:
         return False  # Return False for consistency in boolean values
-    for bit1 in bits1:
-        if any(compare_bit_sets(bit1, bit2) for bit2 in bits2):
-            return True
-    return False
+    return any(compare_kmer_sets(bit1, bits2) for bit1 in bits1)
 
 def round_robin_divide(items: List[Any], 
                        chunk_size: int, 
