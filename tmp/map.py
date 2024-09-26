@@ -95,16 +95,32 @@ def kmerize(string: str, k: int, modifier=None) -> list[str]:
     return [string[i:i+k] for i in range(len(string) - k + 1)]
 
 def compare_kmer_sets(kmers1: set, kmers2: set) -> int:
-    def compare_kmers(kmer_bits1: set, kmer_bits2: set):
+    def bitwise_match(kmer_bits1: list, kmer_bits2: list) -> bool:
+        # Compare bit sets element by element using bitwise AND
         return all(bit1 & bit2 for bit1, bit2 in zip(kmer_bits1, kmer_bits2))
 
+    # Return 0 immediately if either k-mer set is empty
     if not kmers1 or not kmers2:
         return 0
     total_matches = 0
+    # Iterate through each k-mer in the first set
     for kmer_bits1 in kmers1:
-        best_match = max(compare_kmers(kmer_bits1, kmer_bits2) for kmer_bits2 in kmers2)
-        total_matches += best_match
+        # Check if there's any match in the second set
+        if any(bitwise_match(kmer_bits1, kmer_bits2) for kmer_bits2 in kmers2):
+            total_matches += 1
     return total_matches
+
+# def compare_kmer_sets(kmers1: set, kmers2: set) -> int:
+#     def compare_kmers(kmer_bits1: set, kmer_bits2: set):
+#         return all(bit1 & bit2 for bit1, bit2 in zip(kmer_bits1, kmer_bits2))
+
+#     if not kmers1 or not kmers2:
+#         return 0
+#     total_matches = 0
+#     for kmer_bits1 in kmers1:
+#         best_match = max(compare_kmers(kmer_bits1, kmer_bits2) for kmer_bits2 in kmers2)
+#         total_matches += best_match
+#     return total_matches
 
 def calculate_kmer_similarity(seq1: str, seq2: str, k: int) -> float:
     kmers1_bits = kmerize(seq1, k, sequence_to_bits)
