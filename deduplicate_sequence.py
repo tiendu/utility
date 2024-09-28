@@ -8,11 +8,11 @@ from functools import partial
 from itertools import groupby
 from dataclasses import dataclass
 from typing import List, Generator, Dict, Set, Callable, Any
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, wait, as_completed
 
 # Constants
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
-FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna']
+FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
 LINE_LENGTH = 80
 CHUNK_SIZE = 100_000
 
@@ -94,7 +94,8 @@ def sequence_to_bits(dna: str) -> list:
     return [nucl_to_bits[nu.upper()] for nu in dna]
 
 def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
-    k = k or min(len(str1), len(str2))
+    if not k or k > min(len(str1), len(str2)):
+        k = min(len(str1), len(str2))
     bits1 = kmerize(str1, k, sequence_to_bits)
     bits2 = kmerize(str2, k, sequence_to_bits)
     def compare_bit_sets(set1: list, set2: list) -> bool:
@@ -102,7 +103,8 @@ def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
 
     if not bits1 or not bits2:
         return False  # Return False for consistency in boolean values
-    return any(compare_kmer_sets(bit1, bits2) for bit1 in bits1)
+    return any(compare_bit_sets(bit1, bit2)
+               for bit1 in bits1 for bit2 in bits2)
 
 def round_robin_divide(items: List[Any], 
                        chunk_size: int, 
@@ -127,45 +129,58 @@ def round_robin_divide(items: List[Any],
             divided_chunks.append(chunk[i:i + chunk_size])
     return divided_chunks
 
-def deduplicate_chunk(sequences: List[str], uniq_kmers: Set[str], k: int, mode: str) -> List[str]:
+def deduplicate_chunk(sequences: List[str], k: int, mode: str,
+                      global_uniq_seqs: dict, global_uniq_kmers: set) -> List[str]:
     local_uniq_seqs = {}
     local_uniq_kmers = set()
     for seq in sequences:
         kmer_hashes = set(hashed_kmer for hashed_kmer in kmerize(seq.sequence, k, hash_string))
-        # Use bitwise comparison for k-mers
-        if all(kmer_hash in uniq_kmers or kmer_hash in local_uniq_kmers for kmer_hash in kmer_hashes):
+        if all(kmer_hash in local_uniq_kmers or kmer_hash in global_uniq_kmers
+               for kmer_hash in kmer_hashes):
             continue
         if mode == 'nu':
-            if not any(compare_two_strings(seq.sequence, unique_seq.sequence, k) for unique_seq in local_uniq_seqs.values()):
+             if (not any(compare_two_strings(seq.sequence, unique_seq.sequence, k)
+                        for unique_seq in local_uniq_seqs.values()) and
+                not any(compare_two_strings(seq.sequence, unique_seq.sequence, k)
+                        for unique_seq in global_uniq_seqs.values())):
                 local_uniq_seqs[hash_string(seq.sequence)] = seq
                 local_uniq_kmers.update(kmer_hashes)
         elif mode == 'aa':
             local_uniq_seqs[hash_string(seq.sequence)] = seq
             local_uniq_kmers.update(kmer_hashes)
-    uniq_kmers.update(local_uniq_kmers)
-    return list(local_uniq_seqs.values())
+    return local_uniq_seqs, local_uniq_kmers
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) -> List[Seq]:
     chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
     while sequences:
         logging.info(f'Current number of sequences: {len(sequences)}')
-        shared_sequences: Set[Seq] = set()
-        shared_kmers: Set[str] = set()
+        shared_seqs = dict()
+        shared_kmers = set()
         sequences = sorted(sequences, key=lambda seq: seq.length(), reverse=True)
         min_length = sequences[-1].length()
-        chunks = round_robin_divide(sequences, chunk_size, num_threads, key=lambda sequence: sequence.length(), is_descending=True)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-            func = partial(deduplicate_chunk, uniq_kmers=shared_kmers, k=min_length, mode=mode)
+        chunks = round_robin_divide(sequences,
+                                    chunk_size,
+                                    num_threads,
+                                    key=lambda sequence: sequence.length(),
+                                    is_descending=True)
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            func = partial(deduplicate_chunk,
+                           global_uniq_seqs=shared_seqs,
+                           global_uniq_kmers=shared_kmers,
+                           k=min_length,
+                           mode=mode)
             futures = [executor.submit(func, chunk) for chunk in chunks]
-            concurrent.futures.wait(futures)
-            for future in concurrent.futures.as_completed(futures):
-                shared_sequences.update(future.result())
-        if len(shared_sequences) == len(sequences):
+            wait(futures)
+            for future in as_completed(futures):
+                local_uniq_seqs, local_uniq_kmers = future.result()
+                shared_seqs.update(local_uniq_seqs)
+                shared_kmers.update(local_uniq_kmers)
+        if len(shared_seqs) == len(sequences):
             break
-        sequences = list(shared_sequences)
+        sequences = list(shared_seqs.values())
         random.shuffle(sequences)
-    logging.info(f'Final number of sequences: {len(shared_sequences)}')
-    return list(shared_sequences)
+    logging.info(f'Final number of sequences: {len(shared_seqs)}')
+    return list(shared_seqs.values())
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
