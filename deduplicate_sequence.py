@@ -14,7 +14,6 @@ from concurrent.futures import ThreadPoolExecutor, wait, as_completed
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
 FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
 LINE_LENGTH = 80
-CHUNK_SIZE = 100_000
 
 # Setup logging to display messages with INFO level and above.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -106,29 +105,6 @@ def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
     return any(compare_bit_sets(bit1, bit2)
                for bit1 in bits1 for bit2 in bits2)
 
-def round_robin_divide(items: List[Any], 
-                       chunk_size: int, 
-                       num_threads: int, 
-                       key: Callable[[Any], Any], 
-                       is_descending: bool) -> List[List[Any]]:
-    def is_sorted(lst: List[Any], comparison_func: Callable[[Any, Any], bool]) -> bool:
-        return all(comparison_func(lst[i], lst[i + 1]) for i in range(len(lst) - 1))
-    
-    if is_descending:
-        order = lambda x, y: x >= y
-    else:
-        order = lambda x, y: x <= y
-    if not is_sorted([key(item) for item in items], order):
-        items = sorted(items, key=key, reverse=is_descending)
-    chunks = [[] for _ in range(num_threads)]
-    for i, item in enumerate(items):
-        chunks[i % num_threads].append(item)
-    divided_chunks = []
-    for chunk in chunks:
-        for i in range(0, len(chunk), chunk_size):
-            divided_chunks.append(chunk[i:i + chunk_size])
-    return divided_chunks
-
 def deduplicate_chunk(sequences: List[str], mode: str) -> List[str]:
     sequences = sorted(sequences, key=lambda seq: seq.length(), reverse=True)
     k = sequences[-1].length()  # Shortest sequence length
@@ -166,7 +142,7 @@ def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) 
             break
         sequences = list(deduped_seqs.values())
         random.shuffle(sequences)
-    deduped_seqs = list(deduplicate_chunk(sequences, mode))
+    sequences = list(deduplicate_chunk(sequences, mode).values())
     logging.info(f'Final number of sequences: {len(sequences)}')
     return sequences
 
