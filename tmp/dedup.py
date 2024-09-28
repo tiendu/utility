@@ -9,11 +9,13 @@ from itertools import groupby
 from dataclasses import dataclass
 from typing import List, Generator, Dict, Set, Callable, Any
 from concurrent.futures import ThreadPoolExecutor, wait, as_completed
+from collections import OrderedDict, defaultdict
 
 # Constants
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
-FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna']
+FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
 LINE_LENGTH = 80
+CHUNK_SIZE = 100_000
 
 # Setup logging to display messages with INFO level and above.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -92,69 +94,118 @@ def sequence_to_bits(dna: str) -> list:
     }
     return [nucl_to_bits[nu.upper()] for nu in dna]
 
-def compare_two_strings(str1: str, str2: str, k: int=3) -> bool:
-    k = k or min(len(str1), len(str2))
-    bits1 = kmerize(str1, k, sequence_to_bits)
-    bits2 = kmerize(str2, k, sequence_to_bits)
+def compare_sequences(seq1: str, seq2: str, k=3) -> bool:
     def compare_bit_sets(set1: list, set2: list) -> bool:
-        return all(bit1 & bit2 for bit1, bit2 in zip(set1, set2))
+        return all((bit1 & bit2) == bit2 or (bit1 & bit2) == bit1 for bit1, bit2 in zip(set1, set2))
 
+    if not k or k > min(len(seq1), len(seq2)):
+        k = min(len(seq1), len(seq2))
+    bits1 = kmerize(seq1, k, sequence_to_bits)
+    bits2 = kmerize(seq2, k, sequence_to_bits)
     if not bits1 or not bits2:
-        return False  # Return False for consistency in boolean values
-    return any(compare_kmer_sets(bit1, bits2) for bit1 in bits1)
+        return False
+    return any(compare_bit_sets(bit1, bit2) for bit1 in bits1 for bit2 in bits2)
 
+def round_robin_divide(items: List[Any], 
+                       chunk_size: int, 
+                       num_threads: int, 
+                       key: Callable[[Any], Any], 
+                       is_descending: bool) -> List[List[Any]]:
+    def is_sorted(lst: List[Any], comparison_func: Callable[[Any, Any], bool]) -> bool:
+        return all(comparison_func(lst[i], lst[i + 1]) for i in range(len(lst) - 1))
+    
+    if is_descending:
+        order = lambda x, y: x >= y
+    else:
+        order = lambda x, y: x <= y
+    if not is_sorted([key(item) for item in items], order):
+        items = sorted(items, key=key, reverse=is_descending)
+    chunks = [[] for _ in range(num_threads)]
+    for i, item in enumerate(items):
+        chunks[i % num_threads].append(item)
+    divided_chunks = []
+    for chunk in chunks:
+        for i in range(0, len(chunk), chunk_size):
+            divided_chunks.append(chunk[i:i + chunk_size])
+    return divided_chunks
 
-def deduplicate_chunk(sequences: List[str],
-                      mode: str,
-                      k: int,
-                      global_seen_kmers: set,
-                      global_uniq_seqs: dict) -> List[str]:
-    local_uniq_seqs = {}
-    local_seen_kmers = set()
-    for seq in sequences:
-        kmer_hashes = set(hashed_kmer for hashed_kmer in kmerize(seq.sequence, k, hash_string))
-        if all(kmer_hash in global_seen_kmers for kmer_hash in kmer_hashes):
-            continue
-        if mode == 'nu':
-            if not any(compare_two_strings(seq.sequence, unique_seq.sequence, k)
-                       for unique_seq in global_uniq_seqs.values()):
+def deduplicate_chunk(sequences: List[Seq], mode: str, global_uniq_seqs: dict) -> List[str]:
+    def group_sequences_by_length(sequences: list[Seq]) -> OrderedDict[int, list[Seq]]:
+        length_to_sequences = defaultdict(list)
+        for seq in sequences:
+            length_to_sequences[len(seq.sequence)].append(seq)
+        # Sort by length from longest to shortest
+        return OrderedDict(sorted(length_to_sequences.items(), key=lambda x: -x[0]))
+
+    def is_more_general(bit1, bit2) -> bool:
+        # Check if bit1 has more bits set than bit2, meaning it's more ambiguous
+        return bin(bit1).count('1') > bin(bit2).count('1')
+
+    groups = group_sequences_by_length(sequences)
+    uniq_seqs = []
+    
+    # First pass: Within-length comparisons
+    for length in groups:
+        group = groups[length]
+        while group:
+            seq1 = group[0]
+            new_group = []
+            for seq2 in group[1:]:
+                if mode == 'aa':
+                    if seq1.sequence != seq2.sequence:  # Only add unique sequences
+                        new_group.append(seq2)
+                else:
+                    if not compare_sequences(seq1.sequence, seq2.sequence, length):
+                        new_group.append(seq2)
+                    else:
+                        # Prioritize the more general sequence
+                        bits_seq1 = sequence_to_bits(seq1.sequence)
+                        bits_seq2 = sequence_to_bits(seq2.sequence)
+                        if all(is_more_general(b2, b1) for b1, b2 in zip(bits_seq1, bits_seq2)):
+                            seq1 = seq2  # Replace seq1 with the more general sequence
+            uniq_seqs.append(seq1)  # Append seq1 after all comparisons
+            group = new_group
+    # Second pass: Cross-length comparisons
+    local_uniq_seqs = dict()
+    for seq in uniq_seqs:
+        if mode == 'aa':
+            if not any(seq.sequence in other.sequence for other in local_uniq_seqs.values()) and \
+                    hash_string(seq.sequence) not in global_uniq_seqs:
                 local_uniq_seqs[hash_string(seq.sequence)] = seq
-                local_seen_kmers.update(kmer_hashes)
-        elif mode == 'aa':
-            local_uniq_seqs[hash_string(seq.sequence)] = seq
-            local_seen_kmers.update(kmer_hashes)
-    return local_uniq_seqs, local_seen_kmers
+        else:
+            # Add the current sequence to the final list if it's not already covered
+            if not any(compare_sequences(seq.sequence, other.sequence,
+                                         min(len(seq.sequence), len(other.sequence)))
+                                         for other in local_uniq_seqs.values()) and \
+                hash_string(seq.sequence) not in global_uniq_seqs:
+                local_uniq_seqs[hash_string(seq.sequence)] = seq
+    return local_uniq_seqs  # Return only local unique sequences
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) -> List[Seq]:
-    sequences = sorted(sequences, key=lambda seq: seq.length(), reverse=True)
-    k = sequences[-1].length()
-    global_uniq_seqs = {}
-    global_seen_kmers = set()
+    chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
     while sequences:
-        preduped_seqs = {}
-        local_kmers = set()
         logging.info(f'Current number of sequences: {len(sequences)}')
-        size = max(1, len(sequences) // num_threads)  # Calculate chunk size
-        chunks = [sequences[i:i + size] for i in range(0, len(sequences), size)]  # Proper chunking
+        shared_seqs = dict()
+        chunks = round_robin_divide(sequences,
+                                    chunk_size,
+                                    num_threads,
+                                    key=lambda sequence: sequence.length(),
+                                    is_descending=True)
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk,
-                           mode=mode,
-                           k=k,
-                           global_seen_kmers=global_seen_kmers,
-                           global_uniq_seqs=global_uniq_seqs)
+                           global_uniq_seqs=shared_seqs,
+                           mode=mode)
             futures = [executor.submit(func, chunk) for chunk in chunks]
             wait(futures)
             for future in as_completed(futures):
-                local_uniq_seqs, local_seen_kmers = future.result()
-                preduped_seqs.update(local_uniq_seqs)
-                global_seen_kmers.update(local_seen_kmers)
-        global_uniq_seqs.update(preduped_seqs)
-        if len(global_uniq_seqs) == len(sequences):
+                local_uniq_seqs = future.result()
+                shared_seqs.update(local_uniq_seqs)
+        if len(shared_seqs) == len(sequences):
             break
-        sequences = list(global_uniq_seqs.values())
+        sequences = list(shared_seqs.values())
         random.shuffle(sequences)
-    logging.info(f'Final number of sequences: {len(global_uniq_seqs)}')
-    return list(global_uniq_seqs.values())
+    logging.info(f'Final number of sequences: {len(shared_seqs)}')
+    return list(shared_seqs.values())
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
