@@ -129,58 +129,46 @@ def round_robin_divide(items: List[Any],
             divided_chunks.append(chunk[i:i + chunk_size])
     return divided_chunks
 
-def deduplicate_chunk(sequences: List[str], k: int, mode: str,
-                      global_uniq_seqs: dict, global_uniq_kmers: set) -> List[str]:
-    local_uniq_seqs = {}
-    local_uniq_kmers = set()
+def deduplicate_chunk(sequences: List[str], mode: str) -> List[str]:
+    sequences = sorted(sequences, key=lambda seq: seq.length(), reverse=True)
+    k = sequences[-1].length()  # Shortest sequence length
+    uniq_seqs = {}
+    uniq_kmers = set()
     for seq in sequences:
         kmer_hashes = set(hashed_kmer for hashed_kmer in kmerize(seq.sequence, k, hash_string))
-        if all(kmer_hash in local_uniq_kmers or kmer_hash in global_uniq_kmers
-               for kmer_hash in kmer_hashes):
+        if all(kmer_hash in uniq_kmers for kmer_hash in kmer_hashes):
             continue
         if mode == 'nu':
-             if (not any(compare_two_strings(seq.sequence, unique_seq.sequence, k)
-                        for unique_seq in local_uniq_seqs.values()) and
-                not any(compare_two_strings(seq.sequence, unique_seq.sequence, k)
-                        for unique_seq in global_uniq_seqs.values())):
-                local_uniq_seqs[hash_string(seq.sequence)] = seq
-                local_uniq_kmers.update(kmer_hashes)
+             if not any(compare_two_strings(seq.sequence, unique_seq.sequence, k)
+                        for unique_seq in uniq_seqs.values()):
+                uniq_seqs[hash_string(seq.sequence)] = seq
+                uniq_kmers.update(kmer_hashes)
         elif mode == 'aa':
-            local_uniq_seqs[hash_string(seq.sequence)] = seq
-            local_uniq_kmers.update(kmer_hashes)
-    return local_uniq_seqs, local_uniq_kmers
+            uniq_seqs[hash_string(seq.sequence)] = seq
+            uniq_kmers.update(kmer_hashes)
+    return uniq_seqs
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) -> List[Seq]:
-    chunk_size = max(1, min(CHUNK_SIZE, len(sequences) // num_threads))
+    deduped_seqs = dict()
     while sequences:
         logging.info(f'Current number of sequences: {len(sequences)}')
-        shared_seqs = dict()
-        shared_kmers = set()
-        sequences = sorted(sequences, key=lambda seq: seq.length(), reverse=True)
-        min_length = sequences[-1].length()
-        chunks = round_robin_divide(sequences,
-                                    chunk_size,
-                                    num_threads,
-                                    key=lambda sequence: sequence.length(),
-                                    is_descending=True)
+        size = max(1, len(sequences) // num_threads)  # Calculate chunk size
+        chunks = [sequences[i:i + size] for i in range(0, len(sequences), size)]  # Proper chunking
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             func = partial(deduplicate_chunk,
-                           global_uniq_seqs=shared_seqs,
-                           global_uniq_kmers=shared_kmers,
-                           k=min_length,
                            mode=mode)
             futures = [executor.submit(func, chunk) for chunk in chunks]
             wait(futures)
             for future in as_completed(futures):
-                local_uniq_seqs, local_uniq_kmers = future.result()
-                shared_seqs.update(local_uniq_seqs)
-                shared_kmers.update(local_uniq_kmers)
-        if len(shared_seqs) == len(sequences):
+                uniq_seqs = future.result()
+                deduped_seqs.update(uniq_seqs)
+        if len(deduped_seqs) == len(sequences):
             break
-        sequences = list(shared_seqs.values())
+        sequences = list(deduped_seqs.values())
         random.shuffle(sequences)
-    logging.info(f'Final number of sequences: {len(shared_seqs)}')
-    return list(shared_seqs.values())
+    deduped_seqs = list(deduplicate_chunk(sequences, mode))
+    logging.info(f'Final number of sequences: {len(sequences)}')
+    return sequences
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
