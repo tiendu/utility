@@ -9,6 +9,7 @@ from itertools import groupby
 from dataclasses import dataclass
 from typing import List, Generator, Dict, Set, Callable, Any
 from concurrent.futures import ThreadPoolExecutor, wait, as_completed
+from collections import defaultdict
 
 # Constants
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
@@ -65,6 +66,13 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
 
+def kmerize(string: str, k: int, modifier=None) -> list[str]:
+    if len(string) < k:
+        return []
+    if modifier:
+        return [modifier(string[i:i+k]) for i in range(len(string) - k + 1)]
+    return [string[i:i+k] for i in range(len(string) - k + 1)]
+
 def compare_two_dnas(dna1: str, dna2: str) -> bool:
     def dna_to_bits(dna: str) -> list:
         nu_to_bits = {
@@ -98,28 +106,42 @@ def compare_two_dnas(dna1: str, dna2: str) -> bool:
             return True
     return False
 
-def deduplicate_chunk(seqs: List[Seq], mode: str) -> Dict[str, Seq]: 
+def deduplicate_chunk(seqs: List[Seq], mode: str, k: int=5) -> Dict[str, Seq]:
     seqs = sorted(seqs, key=lambda seq: seq.length(), reverse=True)
     uniq_seqs = {}
-    hashed_seqs = set()
-    def is_duplicate(seq: Seq, compare_func) -> bool:
-        hashed_seq = hash_string(seq.sequence)
-        if hashed_seq in hashed_seqs:
-            return True
-        for uniq_seq in uniq_seqs.values():
-            if compare_func(uniq_seq.sequence, seq.sequence):
-                return True
+    kmer_dict = defaultdict(list)
+    def compare_with_kmer_seqs(seq: Seq, compare_func, k: int) -> bool:
+        seq_len = len(seq.sequence)
+        # Case 1: Sequence is shorter than k
+        if seq_len < k:
+            # Check if the short sequence is a subsequence of any k-mer in the dictionary
+            for kmer, seq_list in kmer_dict.items():
+                if compare_func(seq.sequence, kmer):  # Compare short sequence with the k-mer
+                    # Compare the short sequence with all sequences associated with the k-mer
+                    for existing_seq in seq_list:
+                        if compare_func(existing_seq.sequence, seq.sequence):
+                            return True
+            return False
+        # Case 2: Sequence length is >= k
+        seq_kmers = kmerize(seq.sequence, k)  # Generate k-mers from the sequence
+        for kmer in seq_kmers:
+            for dict_kmer in kmer_dict:  # Check if any k-mer from the dictionary matches
+                if compare_func(kmer, dict_kmer):
+                    for existing_seq in kmer_dict[dict_kmer]:
+                        if compare_func(existing_seq.sequence, seq.sequence):
+                            return True
         return False
 
-    if mode == 'nu':  # Nucleotide mode
+    if mode == 'nu':  # Nucleotide comparison
         compare_func = compare_two_dnas
-    elif mode == 'aa':  # Amino acid mode
+    elif mode == 'aa':  # Amino acid comparison
         compare_func = lambda s1, s2: s1 in s2 or s2 in s1
     for seq in seqs:
-        if not is_duplicate(seq, compare_func):
-            hashed_seq = hash_string(seq.sequence)
-            uniq_seqs[hashed_seq] = seq
-            hashed_seqs.add(hashed_seq)
+        if not compare_with_kmer_seqs(seq, compare_func, k):
+            uniq_seqs[hash_string(seq.sequence)] = seq
+            seq_kmers = kmerize(seq.sequence, k)
+            for kmer in seq_kmers:
+                kmer_dict[kmer].append(seq)
     return uniq_seqs
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) -> List[Seq]:
@@ -180,4 +202,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
