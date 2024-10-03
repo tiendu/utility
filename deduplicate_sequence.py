@@ -65,27 +65,27 @@ def write_sequences_to_file(sequences: List[Seq], file_path: str) -> None:
 def hash_string(string: str, hash_function=hashlib.sha3_256) -> str:
     return hash_function(string.encode()).hexdigest()
 
-def dna_to_bits(dna: str) -> list:
-    nu_to_bits = {
-        'A': 0b0001,  # A = 1
-        'T': 0b0010,  # T = 2
-        'G': 0b0100,  # G = 4
-        'C': 0b1000,  # C = 8
-        'W': 0b0011,  # W = A | T = 3
-        'R': 0b0101,  # R = A | G = 5
-        'Y': 0b1010,  # Y = C | T = 10
-        'S': 0b1100,  # S = G | C = 12
-        'K': 0b0110,  # K = G | T = 6
-        'M': 0b1001,  # M = A | C = 9
-        'B': 0b1110,  # B = C | G | T = 14
-        'D': 0b0111,  # D = A | G | T = 7
-        'H': 0b1011,  # H = A | C | T = 11
-        'V': 0b1101,  # V = A | C | G = 13
-        'N': 0b1111   # N = A | C | G | T = 15 (any nucleotide)
-    }
-    return [nu_to_bits[nu.upper()] for nu in dna]
-
 def compare_two_dnas(dna1: str, dna2: str) -> bool:
+    def dna_to_bits(dna: str) -> list:
+        nu_to_bits = {
+            'A': 0b0001,  # A = 1
+            'T': 0b0010,  # T = 2
+            'G': 0b0100,  # G = 4
+            'C': 0b1000,  # C = 8
+            'W': 0b0011,  # W = A | T = 3
+            'R': 0b0101,  # R = A | G = 5
+            'Y': 0b1010,  # Y = C | T = 10
+            'S': 0b1100,  # S = G | C = 12
+            'K': 0b0110,  # K = G | T = 6
+            'M': 0b1001,  # M = A | C = 9
+            'B': 0b1110,  # B = C | G | T = 14
+            'D': 0b0111,  # D = A | G | T = 7
+            'H': 0b1011,  # H = A | C | T = 11
+            'V': 0b1101,  # V = A | C | G = 13
+            'N': 0b1111   # N = A | C | G | T = 15 (any nucleotide)
+        }
+        return [nu_to_bits[nu.upper()] for nu in dna]
+    
     def compare_bits(bits1: list, bits2: list) -> bool:
         return all(bit1 & bit2 for bit1, bit2 in zip(bits1, bits2))
 
@@ -101,7 +101,11 @@ def compare_two_dnas(dna1: str, dna2: str) -> bool:
 def deduplicate_chunk(seqs: List[Seq], mode: str) -> Dict[str, Seq]: 
     seqs = sorted(seqs, key=lambda seq: seq.length(), reverse=True)
     uniq_seqs = {}
+    hashed_seqs = set()
     def is_duplicate(seq: Seq, compare_func) -> bool:
+        hashed_seq = hash_string(seq.sequence)
+        if hashed_seq in hashed_seqs:
+            return True
         for uniq_seq in uniq_seqs.values():
             if compare_func(uniq_seq.sequence, seq.sequence):
                 return True
@@ -113,7 +117,9 @@ def deduplicate_chunk(seqs: List[Seq], mode: str) -> Dict[str, Seq]:
         compare_func = lambda s1, s2: s1 in s2 or s2 in s1
     for seq in seqs:
         if not is_duplicate(seq, compare_func):
-            uniq_seqs[hash_string(seq.sequence)] = seq
+            hashed_seq = hash_string(seq.sequence)
+            uniq_seqs[hashed_seq] = seq
+            hashed_seqs.add(hashed_seq)
     return uniq_seqs
 
 def deduplicate_concurrently(sequences: List[Seq], num_threads: int, mode: str) -> List[Seq]:
