@@ -73,69 +73,62 @@ def kmerize(string: str, k: int, modifier=None) -> list[str]:
         return [modifier(string[i:i+k]) for i in range(len(string) - k + 1)]
     return [string[i:i+k] for i in range(len(string) - k + 1)]
 
-def compare_two_dnas(dna1: str, dna2: str) -> bool:
+def compare_two_dnas(dna1: str, dna2: str, dp=None) -> bool:
     def dna_to_bits(dna: str) -> list:
         nu_to_bits = {
-            'A': 0b0001,  # A = 1
-            'T': 0b0010,  # T = 2
-            'G': 0b0100,  # G = 4
-            'C': 0b1000,  # C = 8
-            'W': 0b0011,  # W = A | T = 3
-            'R': 0b0101,  # R = A | G = 5
-            'Y': 0b1010,  # Y = C | T = 10
-            'S': 0b1100,  # S = G | C = 12
-            'K': 0b0110,  # K = G | T = 6
-            'M': 0b1001,  # M = A | C = 9
-            'B': 0b1110,  # B = C | G | T = 14
-            'D': 0b0111,  # D = A | G | T = 7
-            'H': 0b1011,  # H = A | C | T = 11
-            'V': 0b1101,  # V = A | C | G = 13
-            'N': 0b1111   # N = A | C | G | T = 15 (any nucleotide)
+            'A': 0b0001, 'T': 0b0010, 'G': 0b0100, 'C': 0b1000,
+            'W': 0b0011, 'R': 0b0101, 'Y': 0b1010, 'S': 0b1100,
+            'K': 0b0110, 'M': 0b1001, 'B': 0b1110, 'D': 0b0111,
+            'H': 0b1011, 'V': 0b1101, 'N': 0b1111
         }
         return [nu_to_bits[nu.upper()] for nu in dna]
-    
+
     def compare_bits(bits1: list, bits2: list) -> bool:
         return all(bit1 & bit2 for bit1, bit2 in zip(bits1, bits2))
 
-    long = dna1 if len(dna1) > len(dna2) else dna2
-    short = dna1 if len(dna1) <= len(dna2) else dna2
-    long_bits = dna_to_bits(long)
-    short_bits = dna_to_bits(short)
+    long, short = (dna1, dna2) if len(dna1) > len(dna2) else (dna2, dna1)
+    long_bits, short_bits = dna_to_bits(long), dna_to_bits(short)
+    dp = dp if dp else {}  # DP table to store previous comparisons
     for i in range(len(long) - len(short) + 1):
-        if compare_bits(long_bits[i:i + len(short)], short_bits):
+        key = (tuple(long_bits[i:i + len(short)]), tuple(short_bits))
+        if key in dp:
+            result = dp[key]
+        else:
+            result = compare_bits(long_bits[i:i + len(short)], short_bits)
+            dp[key] = result  # Memoize result
+        if result:
             return True
     return False
 
-def deduplicate_chunk(seqs: List[Seq], mode: str, k: int=5) -> Dict[str, Seq]:
-    seqs = sorted(seqs, key=lambda seq: seq.length(), reverse=True)
+def deduplicate_chunk(seqs: list, mode: str, k: int=5) -> dict:
+    seqs = sorted(seqs, key=lambda seq: len(seq.sequence), reverse=True)
     uniq_seqs = {}
     kmer_dict = defaultdict(list)
-    def compare_with_kmer_seqs(seq: Seq, compare_func, k: int) -> bool:
+    dp_cache = {}  # DP cache for sequence comparisons
+    def compare_with_kmer_seqs(seq, compare_func, k: int) -> bool:
         seq_len = len(seq.sequence)
         # Case 1: Sequence is shorter than k
         if seq_len < k:
-            # Check if the short sequence is a subsequence of any k-mer in the dictionary
             for kmer, seq_list in kmer_dict.items():
-                if compare_func(seq.sequence, kmer):  # Compare short sequence with the k-mer
-                    # Compare the short sequence with all sequences associated with the k-mer
+                if compare_func(seq.sequence, kmer, dp_cache):
                     for existing_seq in seq_list:
-                        if compare_func(existing_seq.sequence, seq.sequence):
+                        if compare_func(existing_seq.sequence, seq.sequence, dp_cache):
                             return True
             return False
         # Case 2: Sequence length is >= k
-        seq_kmers = kmerize(seq.sequence, k)  # Generate k-mers from the sequence
+        seq_kmers = kmerize(seq.sequence, k)
         for kmer in seq_kmers:
-            for dict_kmer in kmer_dict:  # Check if any k-mer from the dictionary matches
-                if compare_func(kmer, dict_kmer):
+            for dict_kmer in kmer_dict:
+                if compare_func(kmer, dict_kmer, dp_cache):
                     for existing_seq in kmer_dict[dict_kmer]:
-                        if compare_func(existing_seq.sequence, seq.sequence):
+                        if compare_func(existing_seq.sequence, seq.sequence, dp_cache):
                             return True
         return False
 
     if mode == 'nu':  # Nucleotide comparison
         compare_func = compare_two_dnas
     elif mode == 'aa':  # Amino acid comparison
-        compare_func = lambda s1, s2: s1 in s2 or s2 in s1
+        compare_func = lambda s1, s2, dp: s1 in s2 or s2 in s1
     for seq in seqs:
         if not compare_with_kmer_seqs(seq, compare_func, k):
             uniq_seqs[hash_string(seq.sequence)] = seq
