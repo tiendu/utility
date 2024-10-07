@@ -275,9 +275,9 @@ def main():
         raise ValueError('Error: One or both input files are empty.')
     is_nucleotide = True if args.mode == 'nu' else False
     max_threads = os.cpu_count()
-    if args.num_threads < 1 or args.num_threads > max_threads:
+    if args.threads < 1 or args.threads > max_threads:
         logging.warning(f'Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}')
-        args.num_threads = min(max(args.num_threads, 1), max_threads)
+        args.threads = min(max(args.threads, 1), max_threads)
     if not (0 <= args.similarity < 1):
         raise ValueError('Similarity threshold should be between 0 (inclusive) and 1 (exclusive)')
     map_sequences(query_seqs, ref_seqs, args.similarity, args.coverage,
