@@ -2,15 +2,20 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import product
 from functools import partial
+from collections import namedtuple
 from math import sqrt
 import csv
 import gzip
+import logging
+import os
 from pathlib import Path
 import argparse
 import sys
 
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
 FASTA_EXTENSIONS = ['.fasta', '.fa', '.fna', '.faa']
+
+logging.basicConfig(level=logging.INFO)
 
 @dataclass(frozen=False)
 class Seq:
@@ -27,6 +32,9 @@ class Seq:
         if isinstance(other, Seq):
             return self.id == other.id and self.sequence == other.sequence
         return False
+
+    def length(self) -> int:
+        return len(self.sequence)
 
 def read_sequences(file_path: Path) -> list[Seq]:
     sequences = []
@@ -87,36 +95,150 @@ def reverse_complement(dna: str) -> str:
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
     return dna[::-1].translate(complement)
 
-def kmerize(string: str, k: int, modifier=None) -> list[str]:
-    if len(string) < k:
-        return []
+def build_suffix_array(string: str) -> list:
+    suffixes = [(string[i:], i) for i in range(len(string))]
+    suffixes = sorted(suffixes, key=lambda substring: substring[0], reverse=False)
+    return suffixes
+
+def compute_lps(pattern: list) -> list:
+    lps = [0] * len(pattern)
+    length = 0  # Length of the previous longest prefix suffix
+    i = 1
+    while i < len(pattern):
+        if pattern[i] == pattern[length]:
+            length += 1
+            lps[i] = length
+            i += 1
+        else:
+            if length != 0:
+                length = lps[length - 1]
+            else:
+                lps[i] = 0
+                i += 1
+    return lps
+
+def kmp_search(text: str, pattern: str, modifier=None, tolerance=0) -> list[tuple[int, float]]:
+    def match(a, b):
+        if isinstance(a, int) and isinstance(b, int):
+            return (a & b) != 0
+        return a == b
+
     if modifier:
-        return [modifier(string[i:i+k]) for i in range(len(string) - k + 1)]
-    return [string[i:i+k] for i in range(len(string) - k + 1)]
+        text = modifier(text)
+        pattern = modifier(pattern)
+    else:
+        text = list(text)
+        pattern = list(pattern)
+    if tolerance >= len(pattern):
+        return set()
+    lps = compute_lps(pattern)
+    occurrences = set()
+    for i in range(len(text)):
+        mismatch = 0
+        j = 0
+        while j < len(pattern) and (i + j) < len(text):
+            if match(text[i + j], pattern[j]):
+                j += 1
+            else:
+                mismatch += 1
+                if mismatch > tolerance:
+                    break
+                j += 1
+        if j == len(pattern) and mismatch <= tolerance:
+            sim_score = (len(pattern) - mismatch) / len(pattern)
+            occurrences.add((i, sim_score))
+    return occurrences
 
-def compare_kmer_sets(kmers1: set, kmers2: set) -> int:
-    def bitwise_match(kmer_bits1: list, kmer_bits2: list) -> bool:
-        # Compare bit sets element by element using bitwise AND
-        return all(bit1 & bit2 for bit1, bit2 in zip(kmer_bits1, kmer_bits2))
+def search_with_suffix_and_kmp(text: str, pattern: str, modifier=None, threshold: float=0.0) -> set:
+    results = set()
+    suffixes = build_suffix_array(text)
+    tolerance = len(pattern) - round(threshold * len(pattern))
+    for suffix, index in suffixes:
+        occurences = kmp_search(suffix, pattern, modifier, tolerance)
+        if occurences:
+            for occurence in occurences:
+                adj_pos = index + occurence[0]
+                sim_score = occurence[1]
+                results.add((adj_pos, sim_score))
+    return results
 
-    # Return 0 immediately if either k-mer set is empty
-    if not kmers1 or not kmers2:
-        return 0
-    total_matches = 0
-    # Iterate through each k-mer in the first set
-    for kmer_bits1 in kmers1:
-        # Check if there's any match in the second set
-        if any(bitwise_match(kmer_bits1, kmer_bits2) for kmer_bits2 in kmers2):
-            total_matches += 1
-    return total_matches
+def map_short_to_long(short: Seq,
+                      long: Seq,
+                      sim_thres: float,
+                      cov_thres: float,
+                      is_nucl: bool) -> list[tuple[str, str, str, float, float, str]] | None:
+    short, long = (long, short) if short.length() > long.length() else (short, long)
+    MatchResult = namedtuple('MatchResult', ['short_id', 'long_id', 'region', 'similarity', 'coverage', 'strand'])
+    coverage = short.length() / long.length()
+    if coverage < cov_thres:
+        return None  # Exit early if coverage is below the threshold
+    results = []
+    covered_regions = set()
+    if is_nucl:
+        rc_short = reverse_complement(short.sequence)
+        fw_matches = search_with_suffix_and_kmp(long.sequence, short.sequence, sequence_to_bits, sim_thres)
+        rc_matches = search_with_suffix_and_kmp(long.sequence, rc_short, sequence_to_bits, sim_thres)
+        if fw_matches:
+            for fw_pos, fw_score in fw_matches:
+                fw_region = f'{fw_pos + 1}..{fw_pos + len(short.sequence)}'
+                best_match_fw = MatchResult(short.id, long.id, fw_region, fw_score, coverage, '+')
+                results.append(best_match_fw)
+                covered_regions.add((fw_pos, fw_pos + len(short.sequence)))  # Mark this region as covered by a forward match
+        if rc_matches:
+            for rc_pos, rc_score in rc_matches:
+                if all(not (rc_pos <= fw_end and rc_pos + len(short.sequence) >= fw_start)
+                       for fw_start, fw_end in covered_regions):  # Check if this reverse match region overlaps with any forward match
+                    rc_region = f'{rc_pos + 1}..{rc_pos + len(short.sequence)}'
+                    best_match_rc = MatchResult(short.id, long.id, rc_region, rc_score, coverage, '-')
+                    results.append(best_match_rc)
+    else:
+        matches = search_with_suffix_and_kmp(long.sequence, short.sequence, modifier=None, threshold=sim_thres)
+        for pos, score in matches:
+            region = f'{pos + 1}..{pos + len(short.sequence)}'
+            results.append(MatchResult(short.id, long.id, region, score, coverage, '.'))
+    formatted_results = [
+        (match.short_id, match.long_id, match.region, f'{match.similarity:.2f}', f'{match.coverage:.2f}', match.strand)
+        for match in results
+    ]
+    return formatted_results if formatted_results else None
 
-def calculate_kmer_similarity(seq1: str, seq2: str, k: int) -> float:
-    kmers1_bits = kmerize(seq1, k, sequence_to_bits)
-    kmers2_bits = kmerize(seq2, k, sequence_to_bits)
-    total_matches = compare_kmer_sets(kmers1_bits, kmers2_bits)
-    total_kmers = max(len(kmers1_bits), len(kmers2_bits))
-    similarity = total_matches / total_kmers if total_kmers > 0 else 0
-    return similarity
+def map_sequences(query_sequences: list[Seq],
+                  reference_sequences: list[Seq],
+                  similarity_threshold: float,
+                  coverage_threshold: float,
+                  is_nucleotide: bool,
+                  output_file: str,
+                  num_threads: int=1) -> None:
+    results = []
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        func = partial(map_short_to_long,
+                       sim_thres=similarity_threshold,
+                       cov_thres=coverage_threshold,
+                       is_nucl=is_nucleotide)
+        futures = [executor.submit(func, query, reference)
+                   for query, reference in product(query_sequences, reference_sequences)]
+        for future in as_completed(futures):
+            if future.result():
+                results.extend(future.result())
+    headers = ['Query_ID', 'Reference_ID', 'Region', 'Similarity', 'Coverage', 'Strand']
+    col_widths = {
+        'Query_ID': 20,
+        'Reference_ID': 20,
+        'Region': 15,
+        'Similarity': 10,
+        'Coverage': 10,
+        'Strand': 5
+    }
+    if results:
+        results = sorted(results, key=lambda x: x[3], reverse=True)
+        stdout_table(headers, results[:10], col_widths)
+        with open(output_file, 'w', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(headers)
+            csv_writer.writerows(results)
+    else:
+        logging.info(f'No matches found.')
 
 def truncate_string(string: str, width: int) -> str:
     return string if len(string) <= width else string[:width - 3] + '...'
@@ -134,110 +256,8 @@ def stdout_table(headers: list[str], rows: list[list[str]], col_widths: dict):
         formatted_row = " | ".join([format_cell(str(value), col_widths[header]) for value, header in zip(row, headers)])
         print(f"| {formatted_row} |")
 
-def short_to_sub_long(i: int,
-                      k: int,
-                      short: Seq,
-                      long: Seq,
-                      sim_thresh: float,
-                      cov_thresh: float,
-                      is_nucleotide: bool,
-                      is_circular: bool) -> tuple[str, str, str, float, float, str] | None:
-    def get_similarity_and_strand(fw_match: str, rc_match: str = '') -> tuple[float, str]:
-        if is_nucleotide:
-            rc_sim = calculate_kmer_similarity(short.sequence, rc_match, k)
-            fw_sim = calculate_kmer_similarity(short.sequence, fw_match, k)
-            if fw_sim >= rc_sim:
-                return fw_sim, '+'
-            return rc_sim, '-'
-        return calculate_kmer_similarity(short.sequence, fw_match, k), '.'
-
-    fw_match = long.sequence[i:i + len(short.sequence)]
-    rc_match = reverse_complement(fw_match) if is_nucleotide else ''
-    best_sim, strand = get_similarity_and_strand(fw_match, rc_match)
-    if is_circular:
-        circular_long = long.sequence + long.sequence
-        fw_match_circ = circular_long[i:i + len(short.sequence)]
-        rc_match_circ = reverse_complement(fw_match_circ) if is_nucleotide else ''
-        best_sim_circ, strand_circ = get_similarity_and_strand(fw_match_circ, rc_match_circ)
-        if best_sim_circ > best_sim:
-            best_sim = best_sim_circ
-            strand = strand_circ
-            match_type = 'circular'
-        else:
-            match_type = 'linear'
-    else:
-        match_type = 'linear'
-    coverage = len(fw_match) / len(long.sequence)
-    if coverage >= cov_thresh and best_sim >= sim_thresh:
-        start = i + 1
-        end = (i + len(short.sequence)) % len(long.sequence) if is_circular else i + len(short.sequence)
-        position = f'{start}..{end}' if match_type == 'linear' else f'{start}..{end} (circular)'
-        return short.id, long.id, position, round(best_sim, 3), round(coverage, 3), strand
-    return None
-
-def map_short_to_long(short: Seq,
-                      long: Seq,
-                      similarity_threshold: float,
-                      coverage_threshold: float,
-                      is_nucleotide: bool,
-                      is_circular: bool=False,
-                      num_threads: int=1) -> list[tuple[str, str, str, float, float, str]]:
-    if len(short.sequence) > len(long.sequence):
-        short, long = long, short 
-    k = max(len(short.sequence) // 5 | 1, 3)
-    results = []
-    indices = range(len(long.sequence) - len(short.sequence) + 1)
-    if is_circular:
-        indices = range((len(long.sequence) - len(short.sequence) + 1) * 2)
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        func = partial(short_to_sub_long, k=k,
-                       short=short, long=long,
-                       sim_thresh=similarity_threshold, cov_thresh=coverage_threshold,
-                       is_nucleotide=is_nucleotide, is_circular=is_circular)
-        
-        futures = [executor.submit(func, i) for i in indices]
-        
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                results.append(result)
-                
-    return results
-
-def map_sequences(query_sequences: list[Seq],
-                  reference_sequences: list[Seq],
-                  similarity_threshold: float,
-                  coverage_threshold: float,
-                  is_nucleotide: bool,
-                  is_circular: bool,
-                  output_file: str,
-                  num_threads: int=1) -> None:
-    results = []
-    for query, reference in product(query_sequences, reference_sequences):
-        result = map_short_to_long(query, reference,
-                                   similarity_threshold, coverage_threshold,
-                                   is_nucleotide, is_circular,
-                                   num_threads)
-        results.extend(result)
-    headers = ['Query_ID', 'Reference_ID', 'Region', 'Similarity', 'Coverage', 'Strand']
-    col_widths = {
-        'Query_ID': 20,
-        'Reference_ID': 20,
-        'Region': 15,
-        'Similarity': 10,
-        'Coverage': 10,
-        'Strand': 5
-    }
-    if results:
-        results = sorted(results, key=lambda x: x[3], reverse=True)
-        stdout_table(headers, results[:10], col_widths)
-        with open(output_file, 'w', newline='') as csvfile:
-            csv_writer = csv.writer(csvfile)
-            csv_writer.writerow(headers)
-            csv_writer.writerows(results)
-
 def main():
-    parser = argparse.ArgumentParser(description='Sequence comparison using k-mers.')
+    parser = argparse.ArgumentParser(description='Sequence comparison using Knuth–Morris–Pratt algorithm with Suffix Array.')
     parser.add_argument('--query', required=True, help='Path to the query input file (FASTA/FASTQ)')
     parser.add_argument('--reference', required=True, help='Path to the reference input file (FASTA/FASTQ)')
     parser.add_argument('-s', '--similarity', type=float, default=0.8,
@@ -246,23 +266,22 @@ def main():
                         help='Coverage threshold for sequence matching (default: 0.0)')
     parser.add_argument('-t', '--threads', type=int, default=4, help='Number of threads')
     parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
-    parser.add_argument('--mode', choices=['nu', 'aa'], default='nu',
+    parser.add_argument('-m', '--mode', choices=['nu', 'aa'], default='nu',
                         help="Comparison mode: 'nu' for DNA/RNA, 'aa' for proteins (default: 'nu')")
-    parser.add_argument('--topology', choices=['linear', 'circular'], default='linear',
-                        help='Determine whether a sequence is linear/circular')
     args = parser.parse_args()
     query_seqs = read_sequences(Path(args.query))
     ref_seqs = read_sequences(Path(args.reference))
     if not query_seqs or not ref_seqs:
-        print('Error: One or both input files are empty.')
-        sys.exit(1)
-    is_circular = False if args.topology == 'linear' else True
+        raise ValueError('Error: One or both input files are empty.')
     is_nucleotide = True if args.mode == 'nu' else False
-    if not is_nucleotide and is_circular:
-        print("Error: Amino acid sequences don't have circular topology")
-        sys.exit(1)
+    max_threads = os.cpu_count()
+    if args.num_threads < 1 or args.num_threads > max_threads:
+        logging.warning(f'Invalid number of threads. Adjusting thread count to be between 1 and {max_threads}')
+        args.num_threads = min(max(args.num_threads, 1), max_threads)
+    if not (0 <= args.similarity < 1):
+        raise ValueError('Similarity threshold should be between 0 (inclusive) and 1 (exclusive)')
     map_sequences(query_seqs, ref_seqs, args.similarity, args.coverage,
-                  is_nucleotide, is_circular, args.output, args.threads)
+                  is_nucleotide, args.output, args.threads)
 
 if __name__ == '__main__':
     main()
