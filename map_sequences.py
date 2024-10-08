@@ -95,13 +95,8 @@ def reverse_complement(dna: str) -> str:
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
     return dna[::-1].translate(complement)
 
-def kmp_search(text: str, pattern: str, modifier=None, tolerance=0) -> list[tuple[int, float]]:
-    def match(a, b):
-        if isinstance(a, int) and isinstance(b, int):
-            return (a & b) != 0
-        return a == b
-
-    def compute_lps(pattern: str) -> list:
+def kmp_search(text: str, pattern: str, tolerance=0) -> list[tuple[int, int, float]]:
+    def compute_lps(pattern: str) -> list[int]:
         lps = [0] * len(pattern)
         length = 0  # Length of the previous longest prefix suffix
         i = 1
@@ -111,29 +106,32 @@ def kmp_search(text: str, pattern: str, modifier=None, tolerance=0) -> list[tupl
                 lps[i] = length
                 i += 1
             else:
-                if length:
+                if length != 0:
                     length = lps[length - 1]
                 else:
                     lps[i] = 0
                     i += 1
         return lps
 
-    text = [modifier(c) for c in text] if modifier else text
-    pattern = [modifier(c) for c in pattern] if modifier else pattern
-    if tolerance >= len(pattern):
-        tolerance = len(pattern) - 1 
     lps = compute_lps(pattern)
     matches = set()
-    for i in range(len(text) - len(pattern) + 1):
-        mismatch = 0  # Reset mismatch counter for this attempt
-        for j in range(len(pattern)):
-            if not match(text[i + j], pattern[j]):
+    i = 0
+    j = 0
+    while i < len(text) - len(pattern) + 1:
+        mismatch = 0
+        while j < len(pattern) and i + j < len(text):
+            if text[i + j] == pattern[j]:
+                j += 1
+            else:
                 mismatch += 1
                 if mismatch > tolerance:
-                    break  # Too many mismatches, abort this match attempt
+                    break
+                j += 1
         if mismatch <= tolerance:
             sim_score = (len(pattern) - mismatch) / len(pattern)
-            matches.add((i, mismatch, sim_score))  # Store position, mismatches, and similarity
+            matches.add((i, mismatch, sim_score))
+        i += 1
+        j = lps[j - 1]
     return matches
 
 def map_short_to_long(short: Seq,
