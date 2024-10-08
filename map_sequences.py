@@ -95,7 +95,13 @@ def reverse_complement(dna: str) -> str:
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
     return dna[::-1].translate(complement)
 
-def kmp_search(text: str, pattern: str, tolerance=0) -> list[tuple[int, int, float]]:
+def kmp_search(text: str, pattern: str,
+               modifier=None, tolerance: int=0) -> list[tuple[int, int, float]]:
+    def match(a, b):
+        if isinstance(a, int) and isinstance(b, int):
+            return (a & b) != 0
+        return a == b
+
     def compute_lps(pattern: str) -> list[int]:
         lps = [0] * len(pattern)
         length = 0  # Length of the previous longest prefix suffix
@@ -113,14 +119,18 @@ def kmp_search(text: str, pattern: str, tolerance=0) -> list[tuple[int, int, flo
                     i += 1
         return lps
 
+    text = [modifier(c) for c in text] if modifier else text
+    pattern = [modifier(c) for c in pattern] if modifier else pattern
+    if tolerance >= len(pattern):
+        tolerance -= 1
     lps = compute_lps(pattern)
     matches = set()
     i = 0
-    j = 0
-    while i < len(text) - len(pattern) + 1:
+    while i <= len(text) - len(pattern):
+        j = 0
         mismatch = 0
-        while j < len(pattern) and i + j < len(text):
-            if text[i + j] == pattern[j]:
+        while j < len(pattern):
+            if match(text[i + j], pattern[j]):
                 j += 1
             else:
                 mismatch += 1
@@ -130,8 +140,10 @@ def kmp_search(text: str, pattern: str, tolerance=0) -> list[tuple[int, int, flo
         if mismatch <= tolerance:
             sim_score = (len(pattern) - mismatch) / len(pattern)
             matches.add((i, mismatch, sim_score))
-        i += 1
-        j = lps[j - 1]
+        if mismatch > tolerance:
+            i += 1
+        else:
+            i += (j - lps[j - 1]) if j > 0 else 1
     return matches
 
 def map_short_to_long(short: Seq,
