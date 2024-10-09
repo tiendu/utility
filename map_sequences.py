@@ -101,16 +101,16 @@ def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) 
             return (a & b) != 0
         return a == b
 
-    def build_index(text: str, k: int) -> dict:
+    def build_index(text: list, k: int) -> dict:
         kmer_index = {}
         for i in range(len(text) - k + 1):
-            kmer = text[i:i + k]
+            kmer = tuple(text[i:i + k]) if modifier else text[i:i + k]
             if kmer not in kmer_index:
                 kmer_index[kmer] = []
             kmer_index[kmer].append(i)
         return kmer_index
 
-    def evaluate_similarity(kmer: str, pattern: str) -> tuple[int, float] | None:
+    def evaluate_similarity(kmer: tuple, pattern: tuple) -> tuple[int, float] | None:
         mismatch = 0
         for j in range(kmer_len):
             if not match(kmer[j], pattern[j]):
@@ -120,17 +120,17 @@ def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) 
         score = (kmer_len - mismatch) / kmer_len
         return mismatch, score
 
-    text = [modifier(c) for c in text] if modifier else text
-    pattern = [modifier(c) for c in pattern] if modifier else pattern
-    matches = set()
+    text = modifier(text) if modifier else text
+    pattern = modifier(pattern) if modifier else pattern
     kmer_len = len(pattern)
-    kmer_index = build_index(text, kmer_len)
     if tolerance >= kmer_len:
         tolerance = kmer_len - 1 
+    matches = set()
+    kmer_index = build_index(text, kmer_len)
     for kmer, locs in kmer_index.items():
-        for loc in locs:
-            result = evaluate_similarity(kmer, pattern)
-            if result:
+        result = evaluate_similarity(kmer, tuple(pattern))  # Convert pattern to tuple as well
+        if result:
+            for loc in locs:
                 matches.add((f'{loc + 1}..{loc + kmer_len}', result[0], result[1]))
     return matches
 
