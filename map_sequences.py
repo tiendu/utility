@@ -95,55 +95,43 @@ def reverse_complement(dna: str) -> str:
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
     return dna[::-1].translate(complement)
 
-def kmp_search(text: str, pattern: str,
-               modifier=None, tolerance: int=0) -> list[tuple[int, int, float]]:
+def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) -> set:
     def match(a, b):
         if isinstance(a, int) and isinstance(b, int):
             return (a & b) != 0
         return a == b
 
-    def compute_lps(pattern: str) -> list[int]:
-        lps = [0] * len(pattern)
-        length = 0  # Length of the previous longest prefix suffix
-        i = 1
-        while i < len(pattern):
-            if pattern[i] == pattern[length]:
-                length += 1
-                lps[i] = length
-                i += 1
-            else:
-                if length != 0:
-                    length = lps[length - 1]
-                else:
-                    lps[i] = 0
-                    i += 1
-        return lps
+    def build_index(text: str, k: int) -> dict:
+        kmer_index = {}
+        for i in range(len(text) - k + 1):
+            kmer = text[i:i + k]
+            if kmer not in kmer_index:
+                kmer_index[kmer] = []
+            kmer_index[kmer].append(i)
+        return kmer_index
+
+    def evaluate_similarity(kmer: str, pattern: str) -> tuple[int, float] | None:
+        mismatch = 0
+        for j in range(kmer_len):
+            if not match(kmer[j], pattern[j]):
+                mismatch += 1
+                if mismatch > tolerance:
+                    return None
+        score = (kmer_len - mismatch) / kmer_len
+        return mismatch, score
 
     text = [modifier(c) for c in text] if modifier else text
     pattern = [modifier(c) for c in pattern] if modifier else pattern
     if tolerance >= len(pattern):
-        tolerance -= 1
-    lps = compute_lps(pattern)
+        tolerance = len(pattern) - 1 
     matches = set()
-    i = 0
-    while i <= len(text) - len(pattern):
-        j = 0
-        mismatch = 0
-        while j < len(pattern):
-            if match(text[i + j], pattern[j]):
-                j += 1
-            else:
-                mismatch += 1
-                if mismatch > tolerance:
-                    break
-                j += 1
-        if mismatch <= tolerance:
-            sim_score = (len(pattern) - mismatch) / len(pattern)
-            matches.add((i, mismatch, sim_score))
-        if mismatch > tolerance:
-            i += 1
-        else:
-            i += (j - lps[j - 1]) if j > 0 else 1
+    kmer_len = len(pattern)
+    kmer_index = build_index(text, kmer_len)
+    for kmer, locs in kmer_index.items():
+        for loc in locs:
+            result = evaluate_similarity(kmer, pattern)
+            if result:
+                matches.add((f'{loc + 1}..{loc + kmer_len}', result[0], result[1]))
     return matches
 
 def map_short_to_long(short: Seq,
@@ -159,26 +147,24 @@ def map_short_to_long(short: Seq,
         return None
     results = set()
     def process_matches(matches, strand, sequence, other_matches=None):
-        for pos, mm, score in matches:
-            region = f'{pos + 1}..{pos + short.length()}'
+        for region, mm, score in matches:
             match = MatchResult(short.id, long.id, region, mm, score, coverage, strand)
             if other_matches:
-                for o_pos, o_mm, o_score in other_matches:  # Compare with reverse complement matches if available
+                for o_region, o_mm, o_score in other_matches:  # Compare with reverse complement matches if available
                     if o_score > score and o_mm < mm:
-                        o_region = f'{o_pos + 1}..{o_pos + short.length()}'
                         match = MatchResult(short.id, long.id, o_region, o_mm, o_score, coverage, '-' if strand == '+' else '+')
             results.add(match)
     
     if is_nucl:
         rc_short = reverse_complement(short.sequence)
-        fw_matches = kmp_search(long.sequence, short.sequence, sequence_to_bits, max_mismatch)
-        rc_matches = kmp_search(long.sequence, rc_short, sequence_to_bits, max_mismatch)
+        fw_matches = search_with_kmer_index(long.sequence, short.sequence, sequence_to_bits, max_mismatch)
+        rc_matches = search_with_kmer_index(long.sequence, rc_short, sequence_to_bits, max_mismatch)
         if fw_matches:
             process_matches(fw_matches, '+', short.sequence, rc_matches)
         elif rc_matches:
             process_matches(rc_matches, '-', rc_short)
     else:
-        matches = kmp_search(long.sequence, short.sequence, modifier=None, tolerance=max_mismatch)
+        matches = search_with_kmer_index(long.sequence, short.sequence, modifier=None, tolerance=max_mismatch)
         process_matches(matches, '.', short.sequence)
     formatted_results = [
         (match.short_id, match.long_id, match.region, match.mismatch, f'{match.similarity:.2f}', f'{match.coverage:.2f}', match.strand)
