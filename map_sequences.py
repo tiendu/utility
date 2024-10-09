@@ -71,7 +71,7 @@ def read_sequences(file_path: Path) -> list[Seq]:
                 sequences.append(Seq(seq_id, ''.join(seq)))
     return sequences
 
-def sequence_to_bits(dna: str) -> list:
+def dna_to_bits(dna: str) -> list:
     nucl_to_bits = {
         'A': 0b0001,  # A = 1
         'T': 0b0010,  # T = 2
@@ -157,8 +157,8 @@ def map_short_to_long(short: Seq,
     
     if is_nucl:
         rc_short = reverse_complement(short.sequence)
-        fw_matches = search_with_kmer_index(long.sequence, short.sequence, sequence_to_bits, max_mismatch)
-        rc_matches = search_with_kmer_index(long.sequence, rc_short, sequence_to_bits, max_mismatch)
+        fw_matches = search_with_kmer_index(long.sequence, short.sequence, dna_to_bits, max_mismatch)
+        rc_matches = search_with_kmer_index(long.sequence, rc_short, dna_to_bits, max_mismatch)
         if fw_matches:
             process_matches(fw_matches, '+', short.sequence, rc_matches)
         elif rc_matches:
