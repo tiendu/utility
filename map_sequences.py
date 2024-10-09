@@ -122,11 +122,11 @@ def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) 
 
     text = [modifier(c) for c in text] if modifier else text
     pattern = [modifier(c) for c in pattern] if modifier else pattern
-    if tolerance >= len(pattern):
-        tolerance = len(pattern) - 1 
     matches = set()
     kmer_len = len(pattern)
     kmer_index = build_index(text, kmer_len)
+    if tolerance >= kmer_len:
+        tolerance = kmer_len - 1 
     for kmer, locs in kmer_index.items():
         for loc in locs:
             result = evaluate_similarity(kmer, pattern)
