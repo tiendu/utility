@@ -2,6 +2,7 @@ import argparse
 import os
 import gzip
 import logging
+import hashlib
 from itertools import groupby
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor
@@ -85,7 +86,7 @@ def compute_lps(pattern: str) -> list[int]:
     return lps
 
 def kmp_search(text: str, pattern: str, lps: list[int], modifier=None) -> bool:
-    def match(a, b):
+    def match(a: str | int, b: str | int) -> bool:
         if isinstance(a, int) and isinstance(b, int):
             return (a & b) != 0
         return a == b
