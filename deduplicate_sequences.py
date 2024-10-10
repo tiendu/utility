@@ -59,6 +59,9 @@ def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
             else:
                 f.write(f'@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n')
 
+def hash_string(string: str, hash_function=hashlib.md5) -> str:
+    return hash_function(string.encode()).hexdigest()
+
 def dna_to_bits(dna: str) -> list[int]:
     nu_to_bits = {
         'A': 0b0001, 'T': 0b0010, 'G': 0b0100, 'C': 0b1000,
@@ -117,8 +120,7 @@ def check_sequence(short: Seq, longers: list[Seq], is_nucl: bool) -> Seq | None:
     return short
 
 def deduplicate_sequences(sequences: list[Seq], num_threads: int, is_nucl: bool) -> list[Seq]:
-    total = len(sequences)
-    deduped_dict = {sequence.sequence: sequence
+    deduped_dict = {hash_string(sequence.sequence): sequence
                     for sequence in sequences}
     short_to_long = sorted(deduped_dict.values(),
                            key=lambda seq: seq.length(),
