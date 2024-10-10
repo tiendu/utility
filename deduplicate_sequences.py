@@ -27,7 +27,7 @@ class Seq:
         return len(self.sequence)
 
 def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
-    sequences = []
+    uniq_seqs = {}
     opener = gzip.open if file_path.endswith('.gz') else open
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
@@ -36,8 +36,10 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                 header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
                 name = header_line[1:]
                 seq = sequence_line.upper()
-                qual = quality_line.upper()
-                sequences.append(Seq(name, seq, qual))
+                qual = quality_line
+                seq_hash = hash_string(seq)
+                if seq_hash not in uniq_seqs:
+                    uniq_seqs[seq_hash] = Seq(name, seq, qual)
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
@@ -45,8 +47,10 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                 headerstr = next(header).strip()
                 name = headerstr[1:]
                 seq = ''.join(s.strip().upper() for s in next(faiter))
-                sequences.append(Seq(name, seq))
-    return sequences
+                seq_hash = hash_string(seq)
+                if seq_hash not in uniq_seqs:
+                    uniq_seqs[seq_hash] = Seq(name, seq, qual)
+    return list(uniq_seqs.values())
 
 def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
     opener = gzip.open if file_path.endswith('.gz') else open
@@ -120,9 +124,7 @@ def check_sequence(short: Seq, longers: list[Seq], is_nucl: bool) -> Seq | None:
     return short
 
 def deduplicate_sequences(sequences: list[Seq], num_threads: int, is_nucl: bool) -> list[Seq]:
-    deduped_dict = {hash_string(sequence.sequence): sequence
-                    for sequence in sequences}
-    short_to_long = sorted(deduped_dict.values(),
+    short_to_long = sorted(sequences,
                            key=lambda seq: seq.length(),
                            reverse=False)
     deduped_set = set()
