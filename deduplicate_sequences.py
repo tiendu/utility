@@ -144,11 +144,12 @@ def deduplicate_sequences(sequences: list[Seq], num_threads: int, is_nucl: bool)
                            key=lambda seq: seq.length(),
                            reverse=False)
     deduped_set = set()
+    compare_len = lambda x, y: x.length() >= y.length() if is_nucl else lambda x, y: x.length() > y.length()
     with ProcessPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         for i, short in enumerate(short_to_long):
             longers = [seq for seq in short_to_long[i + 1:]
-                       if seq.length() > short.length()]
+                       if compare_len(seq, short)]
             future = executor.submit(check_sequence,
                                      short,
                                      longers,
