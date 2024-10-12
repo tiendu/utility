@@ -26,31 +26,47 @@ class Seq:
     def length(self) -> int:
         return len(self.sequence)
 
+def hash_string(string: str, hash_function=hashlib.md5) -> str:
+    return hash_function(string.encode()).hexdigest()
+
+def add_sequence_to_collections(uniq_seqs: dict, sorted_seqs: list,
+                                identifier: str, sequence: str,
+                                quality: str = '') -> None:
+    def insert_in_sorted_order(sorted_seqs: list[Seq], new_seq: Seq) -> None:
+        new_seq_len = new_seq.length()
+        for i, existing_seq in enumerate(sorted_seqs):
+            if existing_seq.length() > new_seq_len:
+                sorted_seqs.insert(i, new_seq)
+                return
+        sorted_seqs.append(new_seq)
+
+    seq_hash = hash_string(sequence)
+    if seq_hash not in uniq_seqs:
+        uniq_seqs[seq_hash] = Seq(identifier, sequence, quality)
+        insert_in_sorted_order(sorted_seqs, uniq_seqs[seq_hash])
+
 def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
     uniq_seqs = {}
+    sorted_seqs = []
     opener = gzip.open if file_path.endswith('.gz') else open
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
                 header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
-                name = header_line[1:]
+                seqid = header_line[1:]
                 seq = sequence_line.upper()
                 qual = quality_line
-                seq_hash = hash_string(seq)
-                if seq_hash not in uniq_seqs:
-                    uniq_seqs[seq_hash] = Seq(name, seq, qual)
+                add_sequence_to_collections(uniq_seqs, sorted_seqs, seqid, seq, qual)
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
             for header in faiter:
-                headerstr = next(header).strip()
-                name = headerstr[1:]
+                header_str = next(header).strip()
+                seqid = header_str[1:]
                 seq = ''.join(s.strip().upper() for s in next(faiter))
-                seq_hash = hash_string(seq)
-                if seq_hash not in uniq_seqs:
-                    uniq_seqs[seq_hash] = Seq(name, seq, qual)
-    return list(uniq_seqs.values())
+                add_sequence_to_collections(uniq_seqs, sorted_seqs, seqid, seq)
+    return sorted_seqs
 
 def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
     opener = gzip.open if file_path.endswith('.gz') else open
@@ -99,7 +115,7 @@ def kmp_search(text: str, pattern: str, lps: list[int], modifier=None) -> bool:
         return a == b
 
     text = modifier(text) if modifier else text
-    pattern = modifier(pattern) if modifier else pattern
+    pattern = tuple(modifier(pattern)) if modifier else pattern
     i = 0  # Index for text
     j = 0  # Index for pattern
     while i < len(text):
