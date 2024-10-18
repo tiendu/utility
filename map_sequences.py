@@ -107,15 +107,18 @@ def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) 
 
     def evaluate_similarity(kmer: tuple | str, pattern: tuple | str) -> tuple[int, float] | None:
         mismatch = 0
-        for j in range(kmer_len):
-            if modifier:
+        if modifier:
+            for j in range(kmer_len):
                 if (kmer[j] & pattern[j]) == 0:
                     mismatch += 1
-            else:
+                    if mismatch > tolerance:
+                        return None
+        else:
+            for j in range(kmer_len):
                 if kmer[j] != pattern[j]:
                     mismatch += 1
-            if mismatch > tolerance:
-                return None
+                    if mismatch > tolerance:
+                        return None
         score = (kmer_len - mismatch) / kmer_len
         return mismatch, score
 
