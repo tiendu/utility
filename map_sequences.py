@@ -96,11 +96,6 @@ def reverse_complement(dna: str) -> str:
     return dna[::-1].translate(complement)
 
 def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) -> set:
-    def match(a, b):
-        if isinstance(a, int) and isinstance(b, int):
-            return (a & b) != 0
-        return a == b
-
     def build_index(text: list, k: int) -> dict:
         kmer_index = {}
         for i in range(len(text) - k + 1):
@@ -110,19 +105,19 @@ def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) 
             kmer_index[kmer].append(i)
         return kmer_index
 
-    def evaluate_similarity(kmer: tuple, pattern: tuple) -> tuple[int, float] | None:
+    def evaluate_similarity(kmer: tuple | str, pattern: tuple | str) -> tuple[int, float] | None:
         mismatch = 0
-        j = 0
-        while j < kmer_len:
-            if not match(kmer[j], pattern[j]):
-                mismatch += 1
-                if mismatch > tolerance:
-                    return None
+        for j in range(kmer_len):
+            if modifier:
+                if (kmer[j] & pattern[j]) == 0:
+                    mismatch += 1
             else:
-                if match(kmer[j:], pattern[j:]):
-                    return mismatch, (kmer_len - mismatch) / kmer_len
-            j += 1
-        return mismatch, (kmer_len - mismatch) / kmer_len
+                if kmer[j] != pattern[j]:
+                    mismatch += 1
+            if mismatch > tolerance:
+                return None
+        score = (kmer_len - mismatch) / kmer_len
+        return mismatch, score
 
     text = modifier(text) if modifier else text
     pattern = tuple(modifier(pattern)) if modifier else pattern
