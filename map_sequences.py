@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import product
@@ -113,13 +112,17 @@ def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) 
 
     def evaluate_similarity(kmer: tuple, pattern: tuple) -> tuple[int, float] | None:
         mismatch = 0
-        for j in range(kmer_len):
+        j = 0
+        while j < kmer_len:
             if not match(kmer[j], pattern[j]):
                 mismatch += 1
                 if mismatch > tolerance:
                     return None
-        score = (kmer_len - mismatch) / kmer_len
-        return mismatch, score
+            else:
+                if match(kmer[j:], pattern[j:]):
+                    return mismatch, (kmer_len - mismatch) / kmer_len
+            j += 1
+        return mismatch, (kmer_len - mismatch) / kmer_len
 
     text = modifier(text) if modifier else text
     pattern = tuple(modifier(pattern)) if modifier else pattern
