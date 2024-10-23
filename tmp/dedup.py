@@ -6,7 +6,7 @@ import hashlib
 from itertools import groupby
 from dataclasses import dataclass
 from bisect import insort
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 # Constants
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
@@ -112,7 +112,7 @@ def check_sequence(short: Seq, longers: list[Seq]) -> Seq | None:
 
 def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
     deduped_set = set()
-    with ProcessPoolExecutor(max_workers=num_threads) as executor:
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         for i, short in enumerate(seqs):
             longers = [seq for seq in seqs[i + 1:] if seq.length() > short.length()]
