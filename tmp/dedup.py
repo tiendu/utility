@@ -33,6 +33,7 @@ def hash_string(string: str, hash_function=hashlib.md5) -> str:
 def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
     unique_seqs = {}
     opener = gzip.open if file_path.endswith('.gz') else open
+    count = 0
     if file_type == 'FASTQ':
         with opener(file_path, 'rt') as fin:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
@@ -43,6 +44,8 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                 qual = quality_line
                 seq_hash = hash_string(seq)
                 if seq_hash not in unique_seqs:
+                    count += 1
+                    logging.info(f'Read sequences: {count}')
                     unique_seqs[seq_hash] = Seq(seqid, seq, qual)
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
@@ -53,6 +56,8 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                 seq = ''.join(s.strip() for s in next(faiter))
                 seq_hash = hash_string(seq)
                 if seq_hash not in unique_seqs:
+                    count += 1
+                    logging.info(f'Read sequences: {count}')
                     unique_seqs[seq_hash] = Seq(seqid, seq)
     return sorted(unique_seqs.values(), key=lambda x: x.length())
 
@@ -88,7 +93,7 @@ def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
             result = future.result()
             if result:
                 deduped_set.add(result)
-            logging.info(f'No. of deduped sequences: {len(deduped_set)}')
+            logging.info(f'Deduped sequences: {len(deduped_set)}')
     return deduped_set
 
 def main() -> None:
