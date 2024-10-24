@@ -38,15 +38,18 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
         with opener(file_path, 'rt') as fin:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
-                header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
-                seqid = header_line[1:]
-                seq = sequence_line
-                qual = quality_line
-                seq_hash = hash_string(seq)
-                if seq_hash not in unique_seqs:
-                    count += 1
-                    logging.info(f'Read sequences: {count}')
-                    unique_seqs[seq_hash] = Seq(seqid, seq, qual)
+                group_lines = [line.strip() for _, line in group]
+                if len(group_lines) == 4:
+                    header_line, sequence_line, _, quality_line = group_lines
+                    if header_line.startswith('@'):
+                        seqid = header_line[1:]
+                        seq = sequence_line
+                        qual = quality_line
+                        seq_hash = hash_string(seq)
+                        if seq_hash not in unique_seqs:
+                            count += 1
+                            logging.info(f'Read sequences: {count}')
+                            unique_seqs[seq_hash] = Seq(seqid, seq, qual)
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
