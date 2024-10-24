@@ -57,11 +57,12 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                 header_str = next(header).strip()
                 seqid = header_str[1:]
                 seq = ''.join(s.strip() for s in next(faiter))
-                seq_hash = hash_string(seq)
-                if seq_hash not in unique_seqs:
-                    count += 1
-                    logging.info(f'Read sequences: {count}')
-                    unique_seqs[seq_hash] = Seq(seqid, seq)
+                if seq:
+                    seq_hash = hash_string(seq)
+                    if seq_hash not in unique_seqs:
+                        count += 1
+                        logging.info(f'Read sequences: {count}')
+                        unique_seqs[seq_hash] = Seq(seqid, seq)
     return sorted(unique_seqs.values(), key=lambda x: x.length())
 
 def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
