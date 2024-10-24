@@ -70,43 +70,9 @@ def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
 def hash_string(string: str, hash_function=hashlib.md5) -> str:
     return hash_function(string.encode()).hexdigest()
 
-def compute_lps(pattern: str) -> list[int]:
-    lps = [0] * len(pattern)
-    length = 0  # Length of the previous longest prefix suffix
-    i = 1
-    while i < len(pattern):
-        if pattern[i] == pattern[length]:
-            length += 1
-            lps[i] = length
-            i += 1
-        else:
-            if length != 0:
-                length = lps[length - 1]
-            else:
-                lps[i] = 0
-                i += 1
-    return lps
-
-def kmp_search(text: str, pattern: str, lps: list[int]) -> bool:
-    i = 0  # Index for text
-    j = 0  # Index for pattern
-    while i < len(text):
-        if pattern[j] == text[i]:
-            i += 1
-            j += 1
-        if j == len(pattern):
-            return True  # Pattern found
-        elif i < len(text) and not pattern[j] == text[i]:
-            if j != 0:
-                j = lps[j - 1]
-            else:
-                i += 1
-    return False  # Pattern not found
-
 def check_sequence(short: Seq, longers: list[Seq]) -> Seq | None:
-    lps = compute_lps(short.sequence)  # Compute LPS array
     for longer in longers:
-        if kmp_search(longer.sequence, short.sequence, lps):
+        if short.sequence in longer.sequence:
             return None
     return short
 
