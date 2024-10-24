@@ -21,6 +21,9 @@ class Seq:
     id: str
     sequence: str
     quality: str = ''
+    def __post_init__(self):
+        object.__setattr__(self, 'sequence', self.sequence.upper())
+        
     def __hash__(self) -> int:
         return hash((self.id, self.sequence, self.quality))
 
