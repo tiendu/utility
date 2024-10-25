@@ -41,18 +41,15 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
         with opener(file_path, 'rt') as fin:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
-                group_lines = [line.strip() for _, line in group]
-                if len(group_lines) == 4:
-                    header_line, sequence_line, _, quality_line = group_lines
-                    if header_line.startswith('@'):
-                        seqid = header_line[1:]
-                        seq = sequence_line
-                        qual = quality_line
-                        seq_hash = hash_string(seq)
-                        if seq_hash not in unique_seqs:
-                            count += 1
-                            logging.info(f'Read sequences: {count}')
-                            unique_seqs[seq_hash] = Seq(seqid, seq, qual)
+                    header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
+                    seqid = header_line[1:]
+                    seq = sequence_line
+                    qual = quality_line
+                    seq_hash = hash_string(seq)
+                    if seq_hash not in unique_seqs:
+                        count += 1
+                        logging.info(f'Read sequences: {count}')
+                        unique_seqs[seq_hash] = Seq(seqid, seq, qual)
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
@@ -60,12 +57,11 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                 header_str = next(header).strip()
                 seqid = header_str[1:]
                 seq = ''.join(s.strip() for s in next(faiter))
-                if seq:
-                    seq_hash = hash_string(seq)
-                    if seq_hash not in unique_seqs:
-                        count += 1
-                        logging.info(f'Read sequences: {count}')
-                        unique_seqs[seq_hash] = Seq(seqid, seq)
+                seq_hash = hash_string(seq)
+                if seq_hash not in unique_seqs:
+                    count += 1
+                    logging.info(f'Read sequences: {count}')
+                    unique_seqs[seq_hash] = Seq(seqid, seq)
     return sorted(unique_seqs.values(), key=lambda x: x.length())
 
 def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
@@ -86,19 +82,19 @@ def check_sequence(short: Seq, longers: list[Seq]) -> Seq | None:
     return short
 
 def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
-    deduped_set = set()
+    deduped = set()
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         for i, short in enumerate(seqs):
             longers = [seq for seq in seqs[i + 1:] if seq.length() > short.length()]
-            futures = executor.submit(check_sequence, short, longers)
+            future = executor.submit(check_sequence, short, longers)
             futures.append(future)
         for future in futures:
             result = future.result()
             if result:
-                deduped_set.add(result)
-            logging.info(f'Deduped sequences: {len(deduped_set)}')
-    return deduped_set
+                deduped.add(result)
+            logging.info(f'Deduped sequences: {len(deduped)}')
+    return deduped
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
