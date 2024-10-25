@@ -79,9 +79,6 @@ def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
             else:
                 f.write(f'@{seq.id}\n{seq.sequence}\n+\n{seq.quality}\n')
 
-def hash_string(string: str, hash_function=hashlib.md5) -> str:
-    return hash_function(string.encode()).hexdigest()
-
 def check_sequence(short: Seq, longers: list[Seq]) -> Seq | None:
     for longer in longers:
         if short.sequence in longer.sequence:
@@ -94,7 +91,7 @@ def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
         futures = []
         for i, short in enumerate(seqs):
             longers = [seq for seq in seqs[i + 1:] if seq.length() > short.length()]
-            future = executor.submit(check_sequence, short, longers)
+            futures = executor.submit(check_sequence, short, longers)
             futures.append(future)
         for future in futures:
             result = future.result()
