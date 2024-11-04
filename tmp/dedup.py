@@ -41,6 +41,7 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
         with opener(file_path, 'rt') as fin:
             groups = groupby(enumerate(fin), key=lambda x: x[0] // 4)
             for _, group in groups:
+                try:
                     header_line, sequence_line, _, quality_line = [line.strip() for _, line in group]
                     seqid = header_line[1:]
                     seq = sequence_line
@@ -50,18 +51,23 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                         count += 1
                         logging.info(f'Read sequences: {count}')
                         unique_seqs[seq_hash] = Seq(seqid, seq, qual)
+                except ValueError:
+                    logging.warning('Malformed FASTQ entry encountered. Skipping')
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             faiter = (x[1] for x in groupby(fin, lambda line: line[0] == '>'))
             for header in faiter:
-                header_str = next(header).strip()
-                seqid = header_str[1:]
-                seq = ''.join(s.strip() for s in next(faiter))
-                seq_hash = hash_string(seq)
-                if seq_hash not in unique_seqs:
-                    count += 1
-                    logging.info(f'Read sequences: {count}')
-                    unique_seqs[seq_hash] = Seq(seqid, seq)
+                try:
+                    header_str = next(header).strip()
+                    seqid = header_str[1:]
+                    seq = ''.join(s.strip() for s in next(faiter))
+                    seq_hash = hash_string(seq)
+                    if seq_hash not in unique_seqs:
+                        count += 1
+                        logging.info(f'Read sequences: {count}')
+                        unique_seqs[seq_hash] = Seq(seqid, seq)
+                except StopIteration:
+                    logging.warning('Incomplete FASTA entry encountered. Skipping')
     return sorted(unique_seqs.values(), key=lambda x: x.length())
 
 def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
