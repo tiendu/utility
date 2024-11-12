@@ -158,22 +158,23 @@ def parse_features(features_content, strand_mapping):
 
     return features
 
-def stdout_fasta(struct):
+def write_fasta(struct, output_path):
     sequence = struct['sequence']
     features = struct['features']
+    with open(output_path, 'w') as outfile:
+        for feature in features:
+            if feature['type'] and feature['name']:
+                start = feature['start']
+                end = feature['end']
+                strand = feature['strand']
+                header = feature['type'] + '|' + feature['name'] + '|' + strand + '|' + f'{start}..{end}'
+                subsequence = sequence[start:end]
 
-    for feature in features:
-        if feature['type'] and feature['name']:
-            start = feature['start']
-            end = feature['end']
-            strand = feature['strand']
-            header = feature['type'] + '|' + feature['name'] + '|' + strand + '|' + f'{start}..{end}'
-            subsequence = sequence[start:end]
+                if strand == '-':
+                    subsequence = reverse_complement(subsequence)
 
-            if strand == '-':
-                subsequence = reverse_complement(subsequence)
-
-            print(f'>{header}\n{subsequence}')
+                outfile.write(f'>{header}\n{subsequence}\n')
+                print(f'>{header}\n{subsequence}')
 
 def reverse_complement(dna):
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
@@ -188,8 +189,4 @@ if __name__ == '__main__':
     input_path = sys.argv[1]
     output_path = sys.argv[2]
     result = parse_snapgene_file(filepath=input_path)
-
-    with open(output_path, 'w') as json_file:
-        json.dump(result, json_file, indent=4)
-
-    stdout_fasta(result)
+    write_fasta(result, output_path)
