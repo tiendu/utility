@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from array import array
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from itertools import product
+from itertools import product, islice
 from functools import partial
 from collections import namedtuple
 from math import sqrt
@@ -23,6 +22,9 @@ class Seq:
     id: str
     sequence: str
     quality: str = ''
+    def __post_init__(self):
+        object.__setattr__(self, 'sequence', self.sequence.upper())
+
     def __hash__(self):
         return hash((self.id, self.sequence))
 
@@ -53,9 +55,7 @@ def read_sequences(file_path: Path) -> list[Seq]:
                 sequence_line = fin.readline().strip()
                 _ = fin.readline().strip()  # Plus line
                 quality_line = fin.readline().strip()
-                sequence_array = array('u', sequence_line.upper())
-                quality_array = array('u', quality_line)
-                sequences.append(Seq(header_line[1:], sequence_array, quality_array))
+                sequences.append(Seq(header_line[1:], sequence_line, quality_line))
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             seq_id, seq = None, []
@@ -63,12 +63,12 @@ def read_sequences(file_path: Path) -> list[Seq]:
                 line = line.strip()
                 if line.startswith('>'):
                     if seq_id:
-                        sequences.append(Seq(seq_id, seq))
-                    seq_id, seq = line[1:], array('u')
+                        sequences.append(Seq(seq_id, ''.join(seq)))
+                    seq_id, seq = line[1:], []
                 else:
-                    seq.extend(array('u', line.upper()))
+                    seq.append(line)
             if seq_id:
-                sequences.append(Seq(seq_id, seq))
+                sequences.append(Seq(seq_id, ''.join(seq)))
     return sequences
 
 def dna_to_bits(dna: str) -> list:
@@ -95,45 +95,26 @@ def reverse_complement(dna: str) -> str:
     complement = str.maketrans('ATGCRYSWKMBDHVN', 'TACGYRSWMKVHDBN')
     return dna[::-1].translate(complement)
 
-def search_with_kmer_index(text: str, pattern: str, modifier=None, tolerance=0) -> set:
-    def build_index(text: list, k: int) -> dict:
-        kmer_index = {}
-        for i in range(len(text) - k + 1):
-            kmer = tuple(text[i:i + k]) if modifier else text[i:i + k]
-            if kmer not in kmer_index:
-                kmer_index[kmer] = []
-            kmer_index[kmer].append(i)
-        return kmer_index
-
-    def evaluate_similarity(kmer: tuple | str, pattern: tuple | str) -> tuple[int, float] | None:
-        mismatch = 0
-        if modifier:
-            for j in range(kmer_len):
-                if (kmer[j] & pattern[j]) == 0:
-                    mismatch += 1
-                    if mismatch > tolerance:
-                        return None
-        else:
-            for j in range(kmer_len):
-                if kmer[j] != pattern[j]:
-                    mismatch += 1
-                    if mismatch > tolerance:
-                        return None
-        score = (kmer_len - mismatch) / kmer_len
-        return mismatch, score
-
+def search(text: str, pattern: str, modifier=None, tolerance=0) -> set:
     text = modifier(text) if modifier else text
     pattern = tuple(modifier(pattern)) if modifier else pattern
-    kmer_len = len(pattern)
-    if tolerance >= kmer_len:
-        tolerance = kmer_len - 1 
     matches = set()
-    kmer_index = build_index(text, kmer_len)
-    for kmer, locs in kmer_index.items():
-        result = evaluate_similarity(kmer, pattern)
-        if result:
-            for loc in locs:
-                matches.add((f'{loc + 1}..{loc + kmer_len}', result[0], result[1]))
+    for i in range(len(text) - len(pattern) + 1):
+        mismatch = 0
+        for j in range(len(pattern)):
+            if modifier:
+                if (text[i + j] & pattern[j]) == 0:
+                    mismatch += 1
+                    if mismatch > tolerance:
+                        break
+            else:
+                if text[i + j] != pattern[j]:
+                    mismatch += 1
+                    if mismatch > tolerance:
+                        break
+        if mismatch <= tolerance:
+            score = (len(pattern) - mismatch) / len(pattern)
+            matches.add((f'{i + 1}..{i + len(pattern)}', score, mismatch))
     return matches
 
 def map_short_to_long(short: Seq,
@@ -176,14 +157,14 @@ def map_short_to_long(short: Seq,
     if is_nucl:
         rc_short = reverse_complement(short.sequence)
         long_sequence = long.sequence if not is_circ else long.sequence + long.sequence
-        fw_matches = search_with_kmer_index(long_sequence, short.sequence, dna_to_bits, max_mismatch)
-        rc_matches = search_with_kmer_index(long_sequence, rc_short, dna_to_bits, max_mismatch)
+        fw_matches = search(long_sequence, short.sequence, dna_to_bits, max_mismatch)
+        rc_matches = search(long_sequence, rc_short, dna_to_bits, max_mismatch)
         if fw_matches:
             process_matches(fw_matches, '+', short.sequence, rc_matches)
         elif rc_matches:
             process_matches(rc_matches, '-', rc_short)
     else:
-        matches = search_with_kmer_index(long.sequence, short.sequence, modifier=None, tolerance=max_mismatch)
+        matches = search(long.sequence, short.sequence, modifier=None, tolerance=max_mismatch)
         process_matches(matches, '.', short.sequence)
     formatted_results = [
         (match.short_id, match.long_id, match.region, match.mismatch, f'{match.similarity:.2f}', f'{match.coverage:.2f}', match.strand)
@@ -199,6 +180,15 @@ def map_sequences(query_sequences: list[Seq],
                   is_circular: bool,
                   output_file: str,
                   num_threads: int) -> None:
+    def chunked_iterable(iterable: list, chunk_size: int):
+        iterator = iter(iterable)
+        for first in iterator:  # Start each chunk with the first item
+            chunk = [first] + list(islice(iterator, chunk_size - 1))
+            if not chunk:
+                break
+            yield chunk
+
+    chunk_size = 100
     results = []
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
@@ -207,8 +197,9 @@ def map_sequences(query_sequences: list[Seq],
                        cov_thres=coverage_threshold,
                        is_nucl=is_nucleotide,
                        is_circ=is_circular)
-        futures = [executor.submit(func, query, reference)
-                   for query, reference in product(query_sequences, reference_sequences)]
+        for chunk in chunked_iterable(product(query_sequences, reference_sequences), chunk_size):
+            chunk_futures = [executor.submit(func, query, reference) for query, reference in chunk]
+            futures.extend(chunk_futures)
         for future in as_completed(futures):
             if future.result():
                 results.extend(future.result())
@@ -248,6 +239,7 @@ def stdout_table(headers: list[str], rows: list[list[str]], col_widths: dict):
         formatted_row = " | ".join([format_cell(str(value), col_widths[header]) for value, header in zip(row, headers)])
         print(f"| {formatted_row} |")
 
+@profile
 def main():
     parser = argparse.ArgumentParser(description='Sequence comparison using Knuth–Morris–Pratt algorithm with Suffix Array.')
     parser.add_argument('--query', required=True, help='Path to the query input file (FASTA/FASTQ)')
