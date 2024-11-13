@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from itertools import product
+from itertools import product, islice
 from functools import partial
 from collections import namedtuple
 from math import sqrt
@@ -199,7 +199,15 @@ def map_sequences(query_sequences: list[Seq],
                   is_circular: bool,
                   output_file: str,
                   num_threads: int) -> None:
+    def chunked_iterable(iterable, chunk_size):
+        iterator = iter(iterable)
+        for first in iterator:  # Start each chunk with the first item
+            chunk = [first] + list(islice(iterator, chunk_size - 1))
+            if not chunk:
+                break
+            yield chunk
     results = []
+    chunk_size = 1_000
     with ProcessPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         func = partial(map_short_to_long,
@@ -207,8 +215,9 @@ def map_sequences(query_sequences: list[Seq],
                        cov_thres=coverage_threshold,
                        is_nucl=is_nucleotide,
                        is_circ=is_circular)
-        futures = [executor.submit(func, query, reference)
-                   for query, reference in product(query_sequences, reference_sequences)]
+        for chunk in chunked_iterable(product(query_sequences, reference_sequences), chunk_size):
+            chunk_futures = [executor.submit(func, query, reference) for query, reference in chunk]
+            futures.extend(chunk_futures)
         for future in as_completed(futures):
             if future.result():
                 results.extend(future.result())
