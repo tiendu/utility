@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from array import array
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import product
 from functools import partial
 from collections import namedtuple
@@ -22,9 +23,6 @@ class Seq:
     id: str
     sequence: str
     quality: str = ''
-    def __post_init__(self):
-        object.__setattr__(self, 'sequence', self.sequence.upper())
-
     def __hash__(self):
         return hash((self.id, self.sequence))
 
@@ -55,7 +53,9 @@ def read_sequences(file_path: Path) -> list[Seq]:
                 sequence_line = fin.readline().strip()
                 _ = fin.readline().strip()  # Plus line
                 quality_line = fin.readline().strip()
-                sequences.append(Seq(header_line[1:], sequence_line, quality_line))
+                sequence_array = array('u', sequence_line.upper())
+                quality_array = array('u', quality_line)
+                sequences.append(Seq(header_line[1:], sequence_array, quality_array))
     elif file_type == 'FASTA':
         with opener(file_path, 'rt') as fin:
             seq_id, seq = None, []
@@ -63,12 +63,12 @@ def read_sequences(file_path: Path) -> list[Seq]:
                 line = line.strip()
                 if line.startswith('>'):
                     if seq_id:
-                        sequences.append(Seq(seq_id, ''.join(seq)))
-                    seq_id, seq = line[1:], []
+                        sequences.append(Seq(seq_id, seq))
+                    seq_id, seq = line[1:], array('u')
                 else:
-                    seq.append(line.upper())
+                    seq.extend(array('u', line.upper()))
             if seq_id:
-                sequences.append(Seq(seq_id, ''.join(seq)))
+                sequences.append(Seq(seq_id, seq))
     return sequences
 
 def dna_to_bits(dna: str) -> list:
@@ -200,7 +200,7 @@ def map_sequences(query_sequences: list[Seq],
                   output_file: str,
                   num_threads: int) -> None:
     results = []
-    with ProcessPoolExecutor(max_workers=num_threads) as executor:
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         func = partial(map_short_to_long,
                        sim_thres=similarity_threshold,
@@ -256,7 +256,7 @@ def main():
                         help='Similarity threshold for sequence matching (default: 0.8)')
     parser.add_argument('-c', '--coverage', type=float, default=0.0,
                         help='Coverage threshold for sequence matching (default: 0.0)')
-    parser.add_argument('-t', '--threads', type=int, default=4, help='Number of threads')
+    parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads')
     parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
     parser.add_argument('-m', '--mode', choices=['nu', 'aa'], default='nu',
                         help='Comparison mode: "nu" for DNA/RNA, "aa" for proteins (default: "nu")')
