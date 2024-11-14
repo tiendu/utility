@@ -100,11 +100,11 @@ def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
             longers = seqs[next_index:]
             future = executor.submit(check_sequence, short, longers)
             futures.append(future)
-            if i % 100 == 0:  # Log progress every 100 iterations
-                logging.info(f'Deduping sequences: {i + 1}/{len(seqs)}')
         for future in as_completed(futures):
             result = future.result()
             if result:
+                if len(deduped) % 100 == 0:  # Log progress every 100 iterations
+                    logging.info(f'Deduped sequences: {len(deduped)}/{len(seqs)}')
                 deduped.add(result)
     logging.info(f'Total deduped sequences: {len(deduped)}')
     return deduped
