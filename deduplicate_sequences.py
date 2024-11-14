@@ -5,7 +5,6 @@ import logging
 import hashlib
 from itertools import groupby
 from dataclasses import dataclass
-from bisect import insort
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Constants
