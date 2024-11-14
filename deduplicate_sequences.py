@@ -5,7 +5,8 @@ import logging
 import hashlib
 from itertools import groupby
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor
+from bisect import insort
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Constants
 FASTQ_EXTENSIONS = ['.fastq', '.fq']
@@ -22,7 +23,7 @@ class Seq:
     quality: str = ''
     def __post_init__(self):
         object.__setattr__(self, 'sequence', self.sequence.upper())
-        
+
     def __hash__(self) -> int:
         return hash((self.id, self.sequence, self.quality))
 
@@ -101,8 +102,8 @@ def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
             future = executor.submit(check_sequence, short, longers)
             futures.append(future)
             if i % 100 == 0:  # Log progress every 100 iterations
-                logging.info(f'Deduped sequences: {i + 1}/{len(seqs)}')
-        for future in futures:
+                logging.info(f'Deduping sequences: {i + 1}/{len(seqs)}')
+        for future in as_completed(futures):
             result = future.result()
             if result:
                 deduped.add(result)
