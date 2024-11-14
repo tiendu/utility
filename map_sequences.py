@@ -180,7 +180,7 @@ def map_sequences(query_sequences: list[Seq],
                   is_circular: bool,
                   output_file: str,
                   num_threads: int) -> None:
-    def chunked_iterable(iterable: list, chunk_size: int):
+    def chunk_iterable(iterable: list, chunk_size: int):
         iterator = iter(iterable)
         for first in iterator:  # Start each chunk with the first item
             chunk = [first] + list(islice(iterator, chunk_size - 1))
@@ -197,7 +197,7 @@ def map_sequences(query_sequences: list[Seq],
                        cov_thres=coverage_threshold,
                        is_nucl=is_nucleotide,
                        is_circ=is_circular)
-        for chunk in chunked_iterable(product(query_sequences, reference_sequences), chunk_size):
+        for chunk in chunk_iterable(product(query_sequences, reference_sequences), chunk_size):
             chunk_futures = [executor.submit(func, query, reference) for query, reference in chunk]
             futures.extend(chunk_futures)
         for future in as_completed(futures):
