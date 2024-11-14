@@ -5,7 +5,6 @@ import logging
 import hashlib
 from itertools import groupby
 from dataclasses import dataclass
-from bisect import insort
 from concurrent.futures import ThreadPoolExecutor
 
 # Constants
@@ -49,7 +48,6 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                     seq_hash = hash_string(seq)
                     if seq_hash not in unique_seqs:
                         count += 1
-                        logging.info(f'Read sequences: {count}')
                         unique_seqs[seq_hash] = Seq(seqid, seq, qual)
                 except ValueError:
                     logging.warning('Malformed FASTQ entry encountered. Skipping')
@@ -64,10 +62,10 @@ def read_sequences_from_file(file_path: str, file_type: str) -> list[Seq]:
                     seq_hash = hash_string(seq)
                     if seq_hash not in unique_seqs:
                         count += 1
-                        logging.info(f'Read sequences: {count}')
                         unique_seqs[seq_hash] = Seq(seqid, seq)
                 except StopIteration:
                     logging.warning('Incomplete FASTA entry encountered. Skipping')
+    logging.info(f'Read sequences: {count}')
     return sorted(unique_seqs.values(), key=lambda x: x.length())
 
 def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
@@ -89,17 +87,26 @@ def check_sequence(short: Seq, longers: list[Seq]) -> Seq | None:
 
 def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
     deduped = set()
+    length_change_indices = []
+    last_length = -1
+    for i, seq in enumerate(seqs):
+        if seq.length() > last_length:
+            length_change_indices.append(i)
+            last_length = seq.length()
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         for i, short in enumerate(seqs):
-            longers = [seq for seq in seqs[i + 1:] if seq.length() > short.length()]
+            next_index = next((index for index in length_change_indices if index > i), len(seqs))
+            longers = seqs[next_index:]
             future = executor.submit(check_sequence, short, longers)
             futures.append(future)
+            if i % 100 == 0:  # Log progress every 100 iterations
+                logging.info(f'Deduped sequences: {i + 1}/{len(seqs)}')
         for future in futures:
             result = future.result()
             if result:
                 deduped.add(result)
-            logging.info(f'Deduped sequences: {len(deduped)}')
+    logging.info(f'Total deduped sequences: {len(deduped)}')
     return deduped
 
 def main() -> None:
