@@ -82,10 +82,10 @@ def write_sequences_to_file(sequences: list[Seq], file_path: str) -> None:
 def check_sequence(short: Seq, longers: list[Seq]) -> Seq | None:
     for longer in longers:
         if short.sequence in longer.sequence:
-            return None
-    return short
+            return short
+    return None
+
 def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
-    deduped = set()
     length_change_indices = []
     last_length = -1
     for i, seq in enumerate(seqs):  # Calculate indices where sequence length changes
@@ -95,23 +95,25 @@ def deduplicate_sequences(seqs: list[Seq], num_threads: int) -> list[Seq]:
     total_sequences = len(seqs)
     progress_interval = max(1, total_sequences // 20)  # Log every 5%
     progress_counter = 0  # Tracks completed futures for logging progress
+    def process_sequence(short, i):
+        next_index = next(
+            (index for index in length_change_indices if index > i),
+            total_sequences
+        )  # Identify the range of longer sequences
+        longers = seqs[next_index:]
+        if check_sequence(short, longers):  # If `short` is a duplicate
+            seqs[i] = None  # Mark as None for removal later
+
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = []
-        for i, short in enumerate(seqs):
-            next_index = next((index for index in length_change_indices if index > i), total_sequences)  # Identify the range of longer sequences
-            longers = seqs[next_index:]
-            future = executor.submit(check_sequence, short, longers)
-            futures.append(future)
+        futures = {executor.submit(process_sequence, seq, i): i for i, seq in enumerate(seqs)}
         for future in as_completed(futures):
-            result = future.result()
-            if result:
-                deduped.add(result)
             progress_counter += 1
             if progress_counter % progress_interval == 0:
                 progress_percent = (progress_counter / total_sequences) * 100
                 logging.info(f'Progress: {progress_percent:.1f}% ({progress_counter}/{total_sequences})')
-    logging.info(f'Total deduplicated sequences: {len(deduped)}')
-    return deduped
+    seqs = [seq for seq in seqs if seq is not None]
+    logging.info(f'Total deduplicated sequences: {len(seqs)}')
+    return seqs
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Deduplicate FASTA/FASTQ sequences.')
