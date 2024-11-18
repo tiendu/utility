@@ -112,7 +112,7 @@ def map_short_to_long(short: Seq, long: Seq, sim_thres: float, cov_thres: float,
     else:
         matches = search(long.sequence, short.sequence, None, max_mismatch)
         process_matches(matches, '.', short.sequence)
-    return [(match[0], match[1], match[2], match[3], f'{match[4]:.2f}', f'{match[5]:.2f}', match[6]) for match in results] if results else None
+    return [(match[0], match[1], match[2], f'{match[3] * 100:.2f}', match[4], f'{match[5] * 100:.2f}', match[6]) for match in results] if results else None
 
 def map_sequences(query_sequences: list[Seq], reference_sequences: list[Seq], similarity_threshold: float, coverage_threshold: float, is_nucleotide: bool, is_circular: bool, output_file: str, num_threads: int) -> None:
     chunk_size = 100
