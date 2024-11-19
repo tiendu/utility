@@ -148,7 +148,7 @@ def main():
     parser.add_argument('--reference', required=True, help='Path to the reference input file (FASTA/FASTQ)')
     parser.add_argument('-s', '--similarity', type=float, default=0.8, help='Similarity threshold for sequence matching (default: 0.8)')
     parser.add_argument('-c', '--coverage', type=float, default=0.0, help='Coverage threshold for sequence matching (default: 0.0)')
-    parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads')
+    parser.add_argument('-t', '--threads', type=int, default=4, help='Number of threads')
     parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
     parser.add_argument('-m', '--mode', choices=['nu', 'aa'], default='nu', help='Comparison mode: "nu" for DNA/RNA, "aa" for proteins (default: "nu")')
     parser.add_argument('--circular', action='store_true', help='Set if the reference sequence is circular')
@@ -156,7 +156,7 @@ def main():
     query_sequences = read_sequences(args.query)
     reference_sequences = read_sequences(args.reference)
     is_nucleotide = args.mode == 'nu'
-    is_circular = args.circular
+    is_circular = args.circular if is_nucleotide else ValueError('Circular topology not available for amino acids')
     map_sequences(query_sequences, reference_sequences, args.similarity, args.coverage, is_nucleotide, is_circular, args.output, args.threads)
 
 if __name__ == '__main__':
